@@ -72,6 +72,8 @@ Init detects installed tool directories and lets you pick which ones to sync.
 Use Space to toggle selections and Enter to confirm.
 `relay sync --plan` previews changes without writing files.
 `relay history` lists recorded sync/watch/rollback events.
+Watch-triggered history entries include source context in `origin` when
+available (example: `watch:codex:review.md`).
 `relay rollback` restores paths from a previous history event.
 `--debug` enables file logging for deeper troubleshooting.
 
@@ -91,6 +93,18 @@ Use Space to toggle selections and Enter to confirm.
 - Default log file: `~/.config/relay/logs/relay-debug.log`
 - Custom log file: `relay --debug --debug-log-file /tmp/relay.log watch`
 - Detailed guide: `docs/debugging.md`
+
+## Local test environment
+
+Create an isolated sandbox in this repo (ignored by git):
+
+```sh
+./scripts/setup-test-env.sh staging
+source ./.local/test-envs/staging/env.sh
+```
+
+Then run relay commands safely against the sandbox instead of your real home
+directories.
 
 ## Smoke test (apple/container)
 

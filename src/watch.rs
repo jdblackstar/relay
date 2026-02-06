@@ -3,7 +3,7 @@ use crate::sync::LogMode;
 use crate::tools::{ToolDefinition, TOOL_DEFINITIONS};
 use notify::RecursiveMode;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[cfg(not(any(test, coverage)))]
 use crate::sync::{self, ExecutionMode};
@@ -38,6 +38,69 @@ pub fn build_watch_list(cfg: &Config) -> Vec<(PathBuf, RecursiveMode)> {
         }
     }
     paths
+}
+
+fn watch_origin(cfg: &Config, paths: &[PathBuf]) -> String {
+    for path in paths {
+        if let Some(origin) = classify_origin(cfg, path) {
+            return origin;
+        }
+    }
+    "watch".to_string()
+}
+
+fn classify_origin(cfg: &Config, path: &Path) -> Option<String> {
+    fn format_origin(path: &Path, root: &Path, label: &str) -> Option<String> {
+        if !path.starts_with(root) {
+            return None;
+        }
+        let rel = path.strip_prefix(root).ok()?;
+        let rel = rel.to_string_lossy().trim_start_matches('/').to_string();
+        if rel.is_empty() {
+            Some(format!("watch:{label}"))
+        } else {
+            Some(format!("watch:{label}:{rel}"))
+        }
+    }
+
+    let mut roots: Vec<(&str, &Path)> = vec![
+        ("central", &cfg.central_dir),
+        ("central_skills", &cfg.central_skills_dir),
+        ("central_agents", &cfg.central_agents_dir),
+        ("central_rules", &cfg.central_rules_dir),
+        ("claude", &cfg.claude_dir),
+        ("claude_skills", &cfg.claude_skills_dir),
+        ("codex", &cfg.codex_dir),
+        ("codex_skills", &cfg.codex_skills_dir),
+        ("opencode", &cfg.opencode_commands_dir),
+        ("opencode_skills", &cfg.opencode_skills_dir),
+        ("cursor", &cfg.cursor_dir),
+    ];
+    if let Some(parent) = cfg.opencode_agents_file.parent() {
+        roots.push(("opencode_agents", parent));
+    }
+    for (label, root) in roots {
+        if let Some(origin) = format_origin(path, root, label) {
+            return Some(origin);
+        }
+    }
+
+    let file_roots: [(&str, &Path); 2] = [
+        ("codex_agents", &cfg.codex_agents_file),
+        ("codex_rules", &cfg.codex_rules_file),
+    ];
+    for (label, root) in file_roots {
+        if path == root {
+            return Some(format!("watch:{label}"));
+        }
+        if let Some(parent) = root.parent() {
+            if let Some(origin) = format_origin(path, parent, label) {
+                return Some(origin);
+            }
+        }
+    }
+
+    None
 }
 
 fn tool_watch_paths(cfg: &Config, tool: &ToolDefinition) -> Vec<(PathBuf, RecursiveMode)> {
@@ -81,9 +144,11 @@ pub fn watch(cfg: &Config, debounce_ms: u64, log_mode: LogMode) -> io::Result<()
     }
 
     loop {
+        let mut changed_paths: Vec<PathBuf> = Vec::new();
         match rx.recv() {
             Ok(Ok(event)) => {
                 crate::logging::debug(&format!("watch event: {event:?}"));
+                changed_paths.extend(event.paths);
             }
             Ok(Err(err)) => {
                 crate::logging::debug(&format!("watch error: {err}"));
@@ -107,6 +172,7 @@ pub fn watch(cfg: &Config, debounce_ms: u64, log_mode: LogMode) -> io::Result<()
             match rx.recv_timeout(remaining) {
                 Ok(Ok(event)) => {
                     crate::logging::debug(&format!("watch debounce event: {event:?}"));
+                    changed_paths.extend(event.paths);
                 }
                 Ok(Err(err)) => {
                     crate::logging::debug(&format!("watch debounce error: {err}"));
@@ -122,8 +188,9 @@ pub fn watch(cfg: &Config, debounce_ms: u64, log_mode: LogMode) -> io::Result<()
                 }
             }
         }
-        crate::logging::debug("watch applying sync");
-        let _ = sync::sync_all_with_mode(cfg, log_mode, ExecutionMode::Apply, "watch")?;
+        let origin = watch_origin(cfg, &changed_paths);
+        crate::logging::debug(&format!("watch applying sync origin={origin}"));
+        let _ = sync::sync_all_with_mode(cfg, log_mode, ExecutionMode::Apply, &origin)?;
     }
 }
 
@@ -228,5 +295,23 @@ mod tests {
         let err = notify::Error::generic("oops");
         let wrapped = to_io(err);
         assert_eq!(wrapped.kind(), io::ErrorKind::Other);
+    }
+
+    #[test]
+    fn watch_origin_marks_codex_path() -> io::Result<()> {
+        let tmp = TempDir::new()?;
+        let cfg = make_config(&tmp);
+        let origin = watch_origin(&cfg, &[cfg.codex_dir.join("review.md")]);
+        assert_eq!(origin, "watch:codex:review.md");
+        Ok(())
+    }
+
+    #[test]
+    fn watch_origin_falls_back_when_unrecognized() -> io::Result<()> {
+        let tmp = TempDir::new()?;
+        let cfg = make_config(&tmp);
+        let origin = watch_origin(&cfg, &[tmp.path().join("other/path.md")]);
+        assert_eq!(origin, "watch");
+        Ok(())
     }
 }

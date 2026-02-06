@@ -110,12 +110,20 @@ impl Config {
 
     pub fn load_or_default() -> io::Result<Self> {
         let path = Self::config_path()?;
+        let relay_home_explicit = env::var("RELAY_HOME")
+            .ok()
+            .map(|value| !value.is_empty())
+            .unwrap_or(false);
         let read_path = if path.exists() {
             Some(path)
         } else {
-            match Self::legacy_config_path() {
-                Ok(legacy) if legacy.exists() => Some(legacy),
-                _ => None,
+            if relay_home_explicit {
+                None
+            } else {
+                match Self::legacy_config_path() {
+                    Ok(legacy) if legacy.exists() => Some(legacy),
+                    _ => None,
+                }
             }
         };
         if let Some(path) = read_path {
@@ -500,7 +508,7 @@ opencode_dir = "/legacy/opencode/command"
     }
 
     #[test]
-    fn load_or_default_uses_legacy_config_dir() -> io::Result<()> {
+    fn load_or_default_ignores_legacy_when_relay_home_is_explicit() -> io::Result<()> {
         let _lock = env_lock();
         let tmp = TempDir::new()?;
         let home = tmp.path().join("home");
@@ -514,7 +522,8 @@ opencode_dir = "/legacy/opencode/command"
         fs::write(&legacy_path, "enabled_tools = [\"claude\"]")?;
 
         let cfg = Config::load_or_default()?;
-        assert!(cfg.tool_enabled("claude"));
+        assert!(cfg.tool_enabled("codex"));
+        assert_eq!(cfg.central_dir, home.join(".config/relay/commands"));
 
         set_env("RELAY_HOME", None);
         set_env("RELAY_CONFIG_DIR", None);
