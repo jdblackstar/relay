@@ -1,0 +1,27 @@
+[package]
+name = "relay"
+version = "0.1.0"
+edition = "2021"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(coverage)"] }
+
+[dependencies]
+clap = { version = "4.5.4", features = ["derive"] }
+console = "0.15.11"
+dialoguer = "0.11.0"
+dirs = "5.0.1"
+notify = "6.1.1"
+serde = { version = "1.0.203", features = ["derive"] }
+toml = "0.8.14"
+
+[dev-dependencies]
+filetime = "0.2.23"
+tempfile = "3.10.1"
+
+[package.metadata.release]
+tag-name = "v{{version}}"
+tag-message = "v{{version}}"
+pre-release-commit-message = "chore: release {{version}}"
+publish = false
+push = true
