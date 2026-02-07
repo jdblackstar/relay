@@ -116,14 +116,12 @@ impl Config {
             .unwrap_or(false);
         let read_path = if path.exists() {
             Some(path)
+        } else if relay_home_explicit {
+            None
         } else {
-            if relay_home_explicit {
-                None
-            } else {
-                match Self::legacy_config_path() {
-                    Ok(legacy) if legacy.exists() => Some(legacy),
-                    _ => None,
-                }
+            match Self::legacy_config_path() {
+                Ok(legacy) if legacy.exists() => Some(legacy),
+                _ => None,
             }
         };
         if let Some(path) = read_path {
