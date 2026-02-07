@@ -1,4 +1,4 @@
-use crate::config::{Config, TOOL_CLAUDE, TOOL_CODEX};
+use crate::config::{Config, TOOL_CLAUDE, TOOL_CODEX, TOOL_OPENCODE};
 use crate::tools::tool_detected;
 use console::style;
 
@@ -18,6 +18,12 @@ pub fn check_versions(cfg: &Config) -> bool {
     if cfg.tool_enabled(TOOL_CLAUDE)
         && tool_detected(cfg, TOOL_CLAUDE)
         && check_command_version("claude", cfg.verified_version(TOOL_CLAUDE))
+    {
+        mismatch = true;
+    }
+    if cfg.tool_enabled(TOOL_OPENCODE)
+        && tool_detected(cfg, TOOL_OPENCODE)
+        && check_command_version("opencode", cfg.verified_version(TOOL_OPENCODE))
     {
         mismatch = true;
     }

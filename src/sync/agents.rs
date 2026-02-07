@@ -129,7 +129,7 @@ mod tests {
         let codex_body = read_body(&cfg.codex_agents_file)?;
         assert_eq!(codex_body, "OpenCode agent");
         let codex_frontmatter = read_frontmatter(&cfg.codex_agents_file)?.unwrap_or_default();
-        assert!(codex_frontmatter.contains("name: codex"));
+        assert!(codex_frontmatter.contains("name: opencode"));
         Ok(())
     }
 
@@ -152,7 +152,7 @@ mod tests {
     }
 
     #[test]
-    fn sync_agents_central_wins_and_preserves_tool_frontmatter() -> io::Result<()> {
+    fn sync_agents_central_wins_and_syncs_required_frontmatter() -> io::Result<()> {
         let (_tmp, cfg) = setup()?;
         let central = cfg.central_agents_dir.join("codex/AGENTS.md");
         write_plain(&cfg.codex_agents_file, &doc("codex", "Old"))?;
@@ -165,11 +165,11 @@ mod tests {
         assert_eq!(read_body(&cfg.codex_agents_file)?, "New");
         assert!(read_frontmatter(&cfg.codex_agents_file)?
             .unwrap_or_default()
-            .contains("name: codex"));
+            .contains("name: central"));
         assert_eq!(read_body(&cfg.opencode_agents_file)?, "New");
         assert!(read_frontmatter(&cfg.opencode_agents_file)?
             .unwrap_or_default()
-            .contains("name: opencode"));
+            .contains("name: central"));
         Ok(())
     }
 

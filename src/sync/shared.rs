@@ -18,6 +18,12 @@ pub(crate) struct MarkdownDoc {
     pub(crate) body_hash: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RequiredFrontmatter {
+    pub(crate) name: String,
+    pub(crate) description: String,
+}
+
 pub(crate) struct MarkdownVariant {
     pub(crate) tool: &'static str,
     pub(crate) path: PathBuf,
@@ -120,20 +126,17 @@ pub(crate) fn update_markdown_target(
     history: &mut Option<HistoryRecorder>,
     label: &str,
 ) -> io::Result<bool> {
+    let frontmatter =
+        select_frontmatter_for_target(source, existing, preserve_frontmatter, log_mode, label);
+    let merged = merge_frontmatter(frontmatter.as_deref(), &source.body);
     if let Some(existing_doc) = existing {
-        if existing_doc.body_hash == source.body_hash {
+        if existing_doc.raw == merged {
             return Ok(false);
         }
         if mode == ExecutionMode::Plan {
             log_action(log_mode, &format!("{label}: would update"));
             return Ok(true);
         }
-        let frontmatter = if preserve_frontmatter {
-            existing_doc.frontmatter.clone()
-        } else {
-            source.frontmatter.clone()
-        };
-        let merged = merge_frontmatter(frontmatter.as_deref(), &source.body);
         write_file(target_path, merged.as_bytes(), mode, history)?;
         log_action(log_mode, &format!("{label}: updated"));
         Ok(true)
@@ -142,12 +145,7 @@ pub(crate) fn update_markdown_target(
             log_action(log_mode, &format!("{label}: would create"));
             return Ok(true);
         }
-        let contents = if preserve_frontmatter {
-            source.body.as_bytes()
-        } else {
-            source.raw.as_bytes()
-        };
-        write_file(target_path, contents, mode, history)?;
+        write_file(target_path, merged.as_bytes(), mode, history)?;
         log_action(log_mode, &format!("{label}: created"));
         Ok(true)
     }
@@ -208,6 +206,65 @@ pub(crate) fn merge_frontmatter(frontmatter: Option<&str>, body: &str) -> String
     }
 }
 
+pub(crate) fn required_frontmatter_hash(doc: &MarkdownDoc) -> Option<u64> {
+    parse_required_frontmatter(doc.frontmatter.as_deref()).map(|required| {
+        let serialized = format!(
+            "name:{}\ndescription:{}",
+            required.name, required.description
+        );
+        hash_bytes(serialized.as_bytes())
+    })
+}
+
+pub(crate) fn select_frontmatter_for_target(
+    source: &MarkdownDoc,
+    existing: Option<&MarkdownDoc>,
+    preserve_frontmatter: bool,
+    log_mode: LogMode,
+    label: &str,
+) -> Option<String> {
+    if !preserve_frontmatter {
+        return source.frontmatter.clone();
+    }
+    let source_required = match parse_required_frontmatter(source.frontmatter.as_deref()) {
+        Some(required) => Some(required),
+        None => {
+            if source.frontmatter.is_some() {
+                log_action(
+                    log_mode,
+                    &format!(
+                        "warning: {label}: skipping frontmatter sync; expected 'name:' and 'description:'"
+                    ),
+                );
+            }
+            None
+        }
+    };
+    match (existing, source_required) {
+        (Some(existing_doc), Some(required)) => {
+            if let Some(frontmatter) = existing_doc.frontmatter.as_deref() {
+                match upsert_required_frontmatter(frontmatter, &required) {
+                    Some(updated) => Some(updated),
+                    None => {
+                        log_action(
+                            log_mode,
+                            &format!(
+                                "warning: {label}: keeping existing frontmatter; unsupported format"
+                            ),
+                        );
+                        existing_doc.frontmatter.clone()
+                    }
+                }
+            } else {
+                Some(render_required_frontmatter(&required))
+            }
+        }
+        (None, Some(required)) => Some(render_required_frontmatter(&required)),
+        (Some(existing_doc), None) => existing_doc.frontmatter.clone(),
+        (None, None) => None,
+    }
+}
+
 pub(crate) fn read_markdown(path: &Path) -> io::Result<MarkdownDoc> {
     let raw = fs::read_to_string(path)?;
     let (frontmatter, body) = split_frontmatter(&raw);
@@ -239,6 +296,107 @@ fn split_frontmatter(contents: &str) -> (Option<String>, String) {
         }
     }
     (None, contents.to_string())
+}
+
+fn parse_required_frontmatter(frontmatter: Option<&str>) -> Option<RequiredFrontmatter> {
+    let frontmatter = frontmatter?;
+    let mut lines = frontmatter.split_inclusive('\n');
+    let first = lines.next()?;
+    if strip_line_end(first) != "---" {
+        return None;
+    }
+    let mut name: Option<String> = None;
+    let mut description: Option<String> = None;
+    let mut has_end = false;
+    for line in lines {
+        if strip_line_end(line) == "---" {
+            has_end = true;
+            break;
+        }
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if let Some(value) = trimmed.strip_prefix("name:") {
+            let value = value.trim();
+            if value.is_empty() {
+                return None;
+            }
+            name = Some(value.to_string());
+            continue;
+        }
+        if let Some(value) = trimmed.strip_prefix("description:") {
+            let value = value.trim();
+            if value.is_empty() {
+                return None;
+            }
+            description = Some(value.to_string());
+        }
+    }
+    if !has_end {
+        return None;
+    }
+    Some(RequiredFrontmatter {
+        name: name?,
+        description: description?,
+    })
+}
+
+fn upsert_required_frontmatter(
+    frontmatter: &str,
+    required: &RequiredFrontmatter,
+) -> Option<String> {
+    let mut lines = frontmatter.split_inclusive('\n');
+    let first = lines.next()?;
+    if strip_line_end(first) != "---" {
+        return None;
+    }
+    let mut out = String::new();
+    out.push_str(first);
+    let mut saw_name = false;
+    let mut saw_description = false;
+    let mut has_end = false;
+
+    for line in lines {
+        if strip_line_end(line) == "---" {
+            if !saw_name {
+                out.push_str(&format!("name: {}\n", required.name));
+            }
+            if !saw_description {
+                out.push_str(&format!("description: {}\n", required.description));
+            }
+            out.push_str(line);
+            has_end = true;
+            continue;
+        }
+        let trimmed_start = line.trim_start();
+        let indent_len = line.len().saturating_sub(trimmed_start.len());
+        let indent = &line[..indent_len];
+        let newline = if line.ends_with('\n') { "\n" } else { "" };
+        if trimmed_start.starts_with("name:") {
+            out.push_str(&format!("{indent}name: {}{newline}", required.name));
+            saw_name = true;
+        } else if trimmed_start.starts_with("description:") {
+            out.push_str(&format!(
+                "{indent}description: {}{newline}",
+                required.description
+            ));
+            saw_description = true;
+        } else {
+            out.push_str(line);
+        }
+    }
+    if !has_end {
+        return None;
+    }
+    Some(out)
+}
+
+fn render_required_frontmatter(required: &RequiredFrontmatter) -> String {
+    format!(
+        "---\nname: {}\ndescription: {}\n---\n",
+        required.name, required.description
+    )
 }
 
 fn strip_line_end(line: &str) -> &str {
@@ -396,6 +554,90 @@ mod tests {
 
         let updated = fs::read_to_string(&target_path)?;
         assert!(updated.contains("name: source"));
+        Ok(())
+    }
+
+    #[test]
+    fn update_markdown_target_syncs_required_frontmatter() -> io::Result<()> {
+        let tmp = TempDir::new()?;
+        let source_path = tmp.path().join("source.md");
+        let target_path = tmp.path().join("target.md");
+        write_plain(
+            &source_path,
+            "---\nname: source\ndescription: source desc\n---\nBody",
+        )?;
+        write_plain(
+            &target_path,
+            "---\nname: target\ndescription: target desc\nextra: keep\n---\nBody",
+        )?;
+        let source = read_markdown(&source_path)?;
+        let existing = read_markdown(&target_path)?;
+        let existing = Some(&existing);
+        let quiet = LogMode::Quiet;
+        let mut history = None;
+        let changed = update_markdown_target(
+            &source,
+            existing,
+            &target_path,
+            true,
+            quiet,
+            ExecutionMode::Apply,
+            &mut history,
+            "update",
+        )?;
+        assert!(changed);
+        let updated = fs::read_to_string(&target_path)?;
+        assert!(updated.contains("name: source"));
+        assert!(updated.contains("description: source desc"));
+        assert!(updated.contains("extra: keep"));
+        Ok(())
+    }
+
+    #[test]
+    fn update_markdown_target_warn_path_keeps_existing_when_source_missing_required_keys(
+    ) -> io::Result<()> {
+        let tmp = TempDir::new()?;
+        let source_path = tmp.path().join("source.md");
+        let target_path = tmp.path().join("target.md");
+        write_plain(&source_path, "---\nname: source\n---\nNew")?;
+        write_plain(
+            &target_path,
+            "---\nname: target\ndescription: target desc\n---\nOld",
+        )?;
+        let source = read_markdown(&source_path)?;
+        let existing = read_markdown(&target_path)?;
+        let existing = Some(&existing);
+        let quiet = LogMode::Quiet;
+        let mut history = None;
+        let changed = update_markdown_target(
+            &source,
+            existing,
+            &target_path,
+            true,
+            quiet,
+            ExecutionMode::Apply,
+            &mut history,
+            "update",
+        )?;
+        assert!(changed);
+        let updated = fs::read_to_string(&target_path)?;
+        assert!(updated.contains("name: target"));
+        assert!(updated.contains("description: target desc"));
+        assert!(updated.ends_with("New"));
+        Ok(())
+    }
+
+    #[test]
+    fn select_frontmatter_for_new_target_uses_required_fields() -> io::Result<()> {
+        let tmp = TempDir::new()?;
+        let source_path = tmp.path().join("source.md");
+        write_plain(
+            &source_path,
+            "---\nname: source\ndescription: source desc\n---\nBody",
+        )?;
+        let source = read_markdown(&source_path)?;
+        let selected = select_frontmatter_for_target(&source, None, true, LogMode::Quiet, "x");
+        assert!(selected.unwrap_or_default().contains("name: source"));
         Ok(())
     }
 

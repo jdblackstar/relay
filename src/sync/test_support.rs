@@ -80,7 +80,7 @@ pub(crate) fn write_plain(path: &Path, contents: &str) -> io::Result<()> {
 }
 
 pub(crate) fn doc(name: &str, body: &str) -> String {
-    format!("---\nname: {name}\n---\n{body}")
+    format!("---\nname: {name}\ndescription: {name} description\n---\n{body}")
 }
 
 pub(crate) fn read_body(path: &Path) -> io::Result<String> {

@@ -106,6 +106,12 @@ source ./.local/test-envs/staging/env.sh
 Then run relay commands safely against the sandbox instead of your real home
 directories.
 
+After code changes, rebuild the sandboxed binary with `cargo build`.
+To return to your regular install, open a new terminal or unset the sandbox
+env vars (`RELAY_HOME`, `CODEX_HOME`, `CLAUDE_HOME`, `OPENCODE_HOME`,
+`CURSOR_HOME`).
+See `docs/debugging.md` for the full switch-over steps.
+
 ## Smoke test (apple/container)
 
 For an isolated end-to-end smoke test using Apple's `container`, see
@@ -122,9 +128,12 @@ For an isolated end-to-end smoke test using Apple's `container`, see
 - Codex skills are synced as directories with `SKILL.md` (same layout as Claude/OpenCode).
 - AGENTS and rules are synced as files per tool into the central store.
 - OpenCode does not have a separate rules file; it uses `AGENTS.md` instead.
-- Frontmatter is ignored for change detection; relay preserves per-tool
-  frontmatter when copying bodies across tools. New files created in other
-  tools omit frontmatter so each tool keeps its own headers.
+- Frontmatter body is ignored for change detection except `name:` and
+  `description:` when both are present in valid frontmatter.
+- Relay syncs `name:` and `description:` across tools; other frontmatter fields
+  remain tool-specific.
+- If frontmatter is missing or malformed, relay skips frontmatter sync and logs
+  a warning.
 - Relay follows symlinks for command files and skill folders. Symlinks inside
   skill folders are ignored to avoid loops.
 - In actions mode, if two tools are edited within about 2 seconds and the
@@ -232,4 +241,7 @@ See `CONTRIBUTING.md` and `SECURITY.md` for contribution and disclosure policy.
 
 ## Roadmap
 
-- `relay import` for project-level skills (e.g. `.opencode/skill`, `.claude/skills`)
+- `relay import` for project-level resources from `.relay/` into your current
+  project (selectively importing skills, commands, and prompts).
+- Import is intentionally deferred for now while ecosystem conventions are
+  shifting toward `.agents/`-style layouts.

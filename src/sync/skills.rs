@@ -1,6 +1,7 @@
 use super::shared::{
-    collect_names, file_mtime_value_from_meta, hash_bytes, list_if, log_action, merge_frontmatter,
-    read_markdown, read_visible_entry, tool_order, write_file, CONFLICT_WINDOW_NS, TOOL_CENTRAL,
+    collect_names, file_mtime_value_from_meta, hash_bytes, list_if, log_action, read_markdown,
+    read_visible_entry, required_frontmatter_hash, select_frontmatter_for_target, tool_order,
+    write_file, CONFLICT_WINDOW_NS, TOOL_CENTRAL,
 };
 use super::{ExecutionMode, LogMode as SyncLogMode, SyncStats};
 use crate::config::{Config, TOOL_CLAUDE, TOOL_CODEX, TOOL_OPENCODE};
@@ -183,7 +184,7 @@ fn sync_skill_target(
 
     let source_skill = source.join("SKILL.md");
     let target_skill = target_path.join("SKILL.md");
-    merge_skill_frontmatter(&source_skill, &target_skill, &temp_path, history)?;
+    merge_skill_frontmatter(&source_skill, &target_skill, &temp_path, log_mode, history)?;
 
     if target_path.exists() {
         fs::remove_dir_all(target_path)?;
@@ -210,6 +211,7 @@ fn merge_skill_frontmatter(
     source_skill: &Path,
     target_skill: &Path,
     temp_path: &Path,
+    log_mode: SyncLogMode,
     _history: &mut Option<HistoryRecorder>,
 ) -> io::Result<()> {
     if !source_skill.exists() {
@@ -220,10 +222,10 @@ fn merge_skill_frontmatter(
         .exists()
         .then(|| read_markdown(target_skill))
         .transpose()?;
-    let merged = match target_doc {
-        Some(target_doc) => merge_frontmatter(target_doc.frontmatter.as_deref(), &source_doc.body),
-        None => source_doc.body,
-    };
+    let label = format!("skills: {}", temp_path.join("SKILL.md").display());
+    let frontmatter =
+        select_frontmatter_for_target(&source_doc, target_doc.as_ref(), true, log_mode, &label);
+    let merged = super::shared::merge_frontmatter(frontmatter.as_deref(), &source_doc.body);
     let mut history = None;
     write_file(
         &temp_path.join("SKILL.md"),
@@ -266,6 +268,9 @@ fn digest_skill_dir(dir: &Path) -> io::Result<DirDigest> {
             let doc = read_markdown(&path)?;
             rel.hash(&mut body_hasher);
             doc.body_hash.hash(&mut body_hasher);
+            required_frontmatter_hash(&doc)
+                .unwrap_or(0)
+                .hash(&mut body_hasher);
         } else {
             let bytes = fs::read(&path)?;
             let hash = hash_bytes(&bytes);
@@ -356,7 +361,7 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
-    fn sync_skills_copies_dir_and_preserves_skill_frontmatter() -> io::Result<()> {
+    fn sync_skills_copies_dir_and_syncs_required_frontmatter() -> io::Result<()> {
         let (_tmp, cfg) = setup()?;
 
         let claude_doc = doc("claude", "Claude skill body");
@@ -374,7 +379,7 @@ mod tests {
         assert!(claude_skill_doc
             .frontmatter
             .unwrap_or_default()
-            .contains("name: claude"));
+            .contains("name: codex"));
         let script = fs::read_to_string(claude_skill.join("scripts/run.sh"))?;
         assert_eq!(script, "echo hi");
         Ok(())
@@ -408,7 +413,7 @@ mod tests {
         assert!(claude_doc
             .frontmatter
             .unwrap_or_default()
-            .contains("name: claude"));
+            .contains("name: opencode"));
         assert_eq!(
             fs::read_to_string(claude_skill.join("assets/logo.txt"))?,
             "asset"
@@ -417,7 +422,7 @@ mod tests {
     }
 
     #[test]
-    fn sync_skills_central_wins_and_preserves_tool_frontmatter() -> io::Result<()> {
+    fn sync_skills_central_wins_and_syncs_required_frontmatter() -> io::Result<()> {
         let (_tmp, cfg) = setup()?;
         let claude_skill = write_skill(&cfg.claude_skills_dir, "plan", &doc("claude", "Old"))?;
         let central_skill = write_skill(&cfg.central_skills_dir, "plan", &doc("central", "New"))?;
@@ -430,7 +435,7 @@ mod tests {
         assert!(claude_doc
             .frontmatter
             .unwrap_or_default()
-            .contains("name: claude"));
+            .contains("name: central"));
         let central_doc = read_markdown(&central_skill.join("SKILL.md"))?;
         assert!(central_doc
             .frontmatter
@@ -506,7 +511,7 @@ mod tests {
         fs::create_dir_all(&temp)?;
         write_plain(&target, &doc("target", "Body"))?;
         let mut history = None;
-        merge_skill_frontmatter(&source, &target, &temp, &mut history)?;
+        merge_skill_frontmatter(&source, &target, &temp, SyncLogMode::Quiet, &mut history)?;
         Ok(())
     }
 
@@ -536,7 +541,7 @@ mod tests {
         )?;
 
         let updated = fs::read_to_string(target.join("SKILL.md"))?;
-        assert!(updated.contains("name: target"));
+        assert!(updated.contains("name: source"));
         assert!(updated.contains("New"));
         std::env::remove_var("RELAY_TEST_TEMP_STAMP");
         Ok(())

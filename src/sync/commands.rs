@@ -113,7 +113,7 @@ mod tests {
     use crate::sync::test_support::{doc, read_body, read_frontmatter, setup, write_plain};
 
     #[test]
-    fn sync_commands_last_write_wins_and_preserves_frontmatter() -> io::Result<()> {
+    fn sync_commands_last_write_wins_and_syncs_required_frontmatter() -> io::Result<()> {
         let (_tmp, cfg) = setup()?;
 
         let claude = cfg.claude_dir.join("review.md");
@@ -132,11 +132,13 @@ mod tests {
         let claude_frontmatter = read_frontmatter(&claude)?;
         assert!(claude_frontmatter
             .unwrap_or_default()
-            .contains("name: claude"));
+            .contains("name: codex"));
 
         let central = cfg.central_dir.join("review.md");
-        let central_doc = fs::read_to_string(central)?;
-        assert_eq!(central_doc, "Codex body");
+        assert_eq!(read_body(&central)?, "Codex body");
+        assert!(read_frontmatter(&central)?
+            .unwrap_or_default()
+            .contains("name: codex"));
         Ok(())
     }
 
@@ -147,8 +149,8 @@ mod tests {
         let claude = cfg.claude_dir.join("same.md");
         let codex = cfg.codex_dir.join("same.md");
 
-        write_plain(&claude, &doc("claude", "Same body"))?;
-        write_plain(&codex, &doc("codex", "Same body"))?;
+        write_plain(&claude, &doc("shared", "Same body"))?;
+        write_plain(&codex, &doc("shared", "Same body"))?;
 
         crate::sync::test_support::set_mtime(&claude, 2_100_000_000)?;
         crate::sync::test_support::set_mtime(&codex, 2_100_000_100)?;
@@ -199,14 +201,14 @@ mod tests {
         assert_eq!(read_body(&claude)?, "New");
         assert!(read_frontmatter(&claude)?
             .unwrap_or_default()
-            .contains("name: claude"));
+            .contains("name: opencode"));
         let codex = cfg.codex_dir.join("build.md");
         assert_eq!(read_body(&codex)?, "New");
         Ok(())
     }
 
     #[test]
-    fn sync_commands_central_wins_and_preserves_tool_frontmatter() -> io::Result<()> {
+    fn sync_commands_central_wins_and_syncs_required_frontmatter() -> io::Result<()> {
         let (_tmp, cfg) = setup()?;
         let claude = cfg.claude_dir.join("review.md");
         let codex = cfg.codex_dir.join("review.md");
@@ -222,11 +224,11 @@ mod tests {
         assert_eq!(read_body(&claude)?, "New");
         assert!(read_frontmatter(&claude)?
             .unwrap_or_default()
-            .contains("name: claude"));
+            .contains("name: central"));
         assert_eq!(read_body(&codex)?, "New");
         assert!(read_frontmatter(&codex)?
             .unwrap_or_default()
-            .contains("name: codex"));
+            .contains("name: central"));
         assert!(read_frontmatter(&central)?
             .unwrap_or_default()
             .contains("name: central"));
