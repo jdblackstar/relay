@@ -47,10 +47,10 @@ Claude and OpenCode also read project commands from `.claude/commands/` and
 and `.opencode/skill/<name>/SKILL.md`; relay currently syncs global locations
 only.
 
-## Install
+## Install 
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/jdblackstar/relay/main/install.sh | sh
+brew install jdblackstar/tap/relay
 ```
 
 Or download a release archive from GitHub and place the `relay` binary on your PATH.
