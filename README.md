@@ -59,15 +59,23 @@ Or download a release archive from GitHub and place the `relay` binary on your P
 
 ```sh
 relay [--debug] [--debug-log-file <path>] init
-relay [--debug] [--debug-log-file <path>] sync [--plan|--apply] [--verbose|--quiet]
-relay [--debug] [--debug-log-file <path>] watch [--quiet]
-relay [--debug] [--debug-log-file <path>] history [--limit 20]
-relay [--debug] [--debug-log-file <path>] rollback <event-id> [--force]
-relay [--debug] [--debug-log-file <path>] rollback --latest [--force]
+relay [--debug] [--debug-log-file <path>] sync [-p|--plan|-a|--apply] [-v|--verbose|-q|--quiet] [-c|--confirm-versions]
+relay [--debug] [--debug-log-file <path>] watch [-b|--debounce-ms 300] [-q|--quiet] [-d|--daemon] [-c|--confirm-versions]
+relay [--debug] [--debug-log-file <path>] status
+relay [--debug] [--debug-log-file <path>] daemon install [-b|--debounce-ms 300] [-q|--quiet] [-c|--confirm-versions]
+relay [--debug] [--debug-log-file <path>] daemon start|stop|restart|status|uninstall
+relay [--debug] [--debug-log-file <path>] history [-n|--limit 20]
+relay [--debug] [--debug-log-file <path>] rollback <event-id> [-f|--force]
+relay [--debug] [--debug-log-file <path>] rollback [-l|--latest] [-f|--force]
 ```
 
 `relay init` is interactive and writes config to `~/.config/relay/config.toml`.
 `relay watch` is event-driven with a small debounce and keeps copies aligned.
+`relay watch --daemon` installs/updates and starts a native background service:
+- macOS: `launchd` user agent
+- Linux: `systemd --user` service
+`relay daemon` exposes explicit lifecycle control for that service.
+`relay status` is shorthand for `relay daemon status`.
 Init detects installed tool directories and lets you pick which ones to sync.
 Use Space to toggle selections and Enter to confirm.
 `relay sync --plan` previews changes without writing files.
@@ -82,9 +90,13 @@ available (example: `watch:codex:review.md`).
 - `relay sync --plan`: preview writes without changing files.
 - `relay sync --apply`: execute writes and record a history event.
 - `relay watch`: auto-apply writes on file events and record history events.
+- `relay watch --daemon`: run watch as native background service.
 - `relay rollback`: restore paths from a recorded event.
 - `relay rollback` validates current file state before restoring; use `--force`
   only when you intentionally want to override newer edits.
+- `relay rollback` restores the paths written by the chosen event (for example,
+  mirrored targets from a watch sync), which may not include the original
+  source file that triggered the sync.
 
 ## Debugging
 
@@ -92,6 +104,7 @@ available (example: `watch:codex:review.md`).
 - Debug logging: `relay --debug sync --apply --verbose`
 - Default log file: `~/.config/relay/logs/relay-debug.log`
 - Custom log file: `relay --debug --debug-log-file /tmp/relay.log watch`
+- Service status: `relay status` (or `relay daemon status`)
 - Detailed guide: `docs/debugging.md`
 
 ## Local test environment
