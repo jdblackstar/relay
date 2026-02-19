@@ -1,6 +1,6 @@
 #![cfg_attr(any(test, coverage), allow(dead_code))]
 
-use crate::config::{resolve_home_dir, Config};
+use crate::config::Config;
 use std::collections::BTreeMap;
 use std::env;
 use std::fs;
@@ -256,9 +256,7 @@ fn runtime_dir(cfg: &Config) -> io::Result<PathBuf> {
 }
 
 fn launch_agents_dir() -> io::Result<PathBuf> {
-    let home = resolve_home_dir().ok_or_else(|| {
-        io::Error::new(io::ErrorKind::NotFound, "could not resolve home directory")
-    })?;
+    let home = os_home_dir()?;
     Ok(home.join("Library/LaunchAgents"))
 }
 
@@ -268,10 +266,13 @@ fn systemd_user_dir() -> io::Result<PathBuf> {
             return Ok(PathBuf::from(path).join("systemd/user"));
         }
     }
-    let home = resolve_home_dir().ok_or_else(|| {
-        io::Error::new(io::ErrorKind::NotFound, "could not resolve home directory")
-    })?;
+    let home = os_home_dir()?;
     Ok(home.join(".config/systemd/user"))
+}
+
+fn os_home_dir() -> io::Result<PathBuf> {
+    dirs::home_dir()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "could not resolve home directory"))
 }
 
 fn service_env_vars() -> BTreeMap<String, String> {
@@ -534,6 +535,8 @@ fn combined_output(output: &Output) -> String {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+    use std::env;
+    use std::ffi::OsString;
     use tempfile::TempDir;
 
     fn make_config(tmp: &TempDir) -> Config {
@@ -598,7 +601,11 @@ mod tests {
         env.insert("RELAY_HOME".to_string(), "/tmp/50%relay".to_string());
         let body = render_systemd_unit(
             Path::new("/usr/local/bin/relay%bin"),
-            &["watch".to_string(), "--debug-log-file".to_string(), "/tmp/relay%log".to_string()],
+            &[
+                "watch".to_string(),
+                "--debug-log-file".to_string(),
+                "/tmp/relay%log".to_string(),
+            ],
             &env,
         );
         assert!(body.contains(
@@ -635,5 +642,48 @@ mod tests {
                 "/tmp/relay.log".to_string()
             ]
         );
+    }
+
+    fn restore_env_var(key: &str, value: Option<OsString>) {
+        if let Some(value) = value {
+            env::set_var(key, value);
+        } else {
+            env::remove_var(key);
+        }
+    }
+
+    #[test]
+    fn launch_agents_dir_ignores_relay_home() -> io::Result<()> {
+        let _lock = crate::ENV_LOCK.lock().unwrap();
+        let prev_relay_home = env::var_os("RELAY_HOME");
+        env::set_var("RELAY_HOME", "/tmp/relay-home-override");
+
+        let expected = dirs::home_dir()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "home unavailable"))?
+            .join("Library/LaunchAgents");
+        let result = launch_agents_dir();
+
+        restore_env_var("RELAY_HOME", prev_relay_home);
+        assert_eq!(result?, expected);
+        Ok(())
+    }
+
+    #[test]
+    fn systemd_user_dir_ignores_relay_home_when_xdg_config_home_unset() -> io::Result<()> {
+        let _lock = crate::ENV_LOCK.lock().unwrap();
+        let prev_relay_home = env::var_os("RELAY_HOME");
+        let prev_xdg_config_home = env::var_os("XDG_CONFIG_HOME");
+        env::set_var("RELAY_HOME", "/tmp/relay-home-override");
+        env::remove_var("XDG_CONFIG_HOME");
+
+        let expected = dirs::home_dir()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "home unavailable"))?
+            .join(".config/systemd/user");
+        let result = systemd_user_dir();
+
+        restore_env_var("RELAY_HOME", prev_relay_home);
+        restore_env_var("XDG_CONFIG_HOME", prev_xdg_config_home);
+        assert_eq!(result?, expected);
+        Ok(())
     }
 }
