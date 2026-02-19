@@ -1,4 +1,5 @@
 mod config;
+mod daemon;
 mod history;
 mod init;
 mod logging;
@@ -41,36 +42,46 @@ enum Commands {
     /// Sync command and skill files across tools
     Sync {
         /// Show per-action output
-        #[arg(long, conflicts_with = "quiet")]
+        #[arg(short = 'v', long, conflicts_with = "quiet")]
         verbose: bool,
         /// Suppress all output
-        #[arg(long, conflicts_with = "verbose")]
+        #[arg(short = 'q', long, conflicts_with = "verbose")]
         quiet: bool,
         /// Prompt if verified tool versions differ
-        #[arg(long)]
+        #[arg(short = 'c', long)]
         confirm_versions: bool,
         /// Preview changes without writing files
-        #[arg(long, conflicts_with = "apply")]
+        #[arg(short = 'p', long, conflicts_with = "apply")]
         plan: bool,
         /// Explicitly apply changes (default behavior)
-        #[arg(long, conflicts_with = "plan")]
+        #[arg(short = 'a', long, conflicts_with = "plan")]
         apply: bool,
     },
     /// Watch folders and sync changes
     Watch {
-        #[arg(long, default_value = "300")]
+        #[arg(short = 'b', long, default_value = "300")]
         debounce_ms: u64,
         /// Suppress all output
-        #[arg(long)]
+        #[arg(short = 'q', long)]
         quiet: bool,
+        /// Install and run watch as a background service (launchd/systemd)
+        #[arg(short = 'd', long)]
+        daemon: bool,
         /// Prompt if verified tool versions differ
-        #[arg(long)]
+        #[arg(short = 'c', long)]
         confirm_versions: bool,
+    },
+    /// Show background service status
+    Status,
+    /// Manage background watch service (launchd/systemd)
+    Daemon {
+        #[command(subcommand)]
+        command: DaemonCommand,
     },
     /// Show recent sync/watch history events
     History {
         /// Number of events to show
-        #[arg(long, default_value = "20")]
+        #[arg(short = 'n', long, default_value = "20")]
         limit: usize,
     },
     /// Roll back a specific history event
@@ -78,12 +89,36 @@ enum Commands {
         /// Event id to roll back
         event_id: Option<String>,
         /// Roll back the latest event
-        #[arg(long, conflicts_with = "event_id")]
+        #[arg(short = 'l', long, conflicts_with = "event_id")]
         latest: bool,
         /// Skip hash safety checks
-        #[arg(long)]
+        #[arg(short = 'f', long)]
         force: bool,
     },
+}
+
+#[derive(Subcommand)]
+enum DaemonCommand {
+    /// Install or update the watch service definition
+    Install {
+        #[arg(short = 'b', long, default_value = "300")]
+        debounce_ms: u64,
+        #[arg(short = 'q', long)]
+        quiet: bool,
+        /// Prompt if verified tool versions differ
+        #[arg(short = 'c', long)]
+        confirm_versions: bool,
+    },
+    /// Start the installed watch service
+    Start,
+    /// Stop the watch service
+    Stop,
+    /// Restart the watch service
+    Restart,
+    /// Show watch service status
+    Status,
+    /// Stop and remove the watch service definition
+    Uninstall,
 }
 
 #[cfg(all(not(any(test, coverage)), windows))]
@@ -94,10 +129,14 @@ fn main() {
 
 #[cfg(all(not(any(test, coverage)), not(windows)))]
 fn main() -> std::io::Result<()> {
-    let cli = Cli::parse();
-    logging::init(cli.debug, cli.debug_log_file.as_deref());
+    let Cli {
+        debug,
+        debug_log_file,
+        command,
+    } = Cli::parse();
+    logging::init(debug, debug_log_file.as_deref());
     logging::debug("relay start");
-    match cli.command {
+    match command {
         Commands::Init => {
             logging::debug("command=init");
             init::init()
@@ -151,14 +190,27 @@ fn main() -> std::io::Result<()> {
         Commands::Watch {
             debounce_ms,
             quiet,
+            daemon,
             confirm_versions,
         } => {
             logging::debug(&format!(
-                "command=watch debounce_ms={debounce_ms} quiet={quiet} confirm_versions={confirm_versions}"
+                "command=watch debounce_ms={debounce_ms} quiet={quiet} daemon={daemon} confirm_versions={confirm_versions}"
             ));
             let cfg = config::Config::load_or_default()?;
             let mismatch = versions::check_versions(&cfg);
             if confirm_versions && mismatch && !versions::confirm_version_mismatch()? {
+                return Ok(());
+            }
+            if daemon {
+                let options = daemon::InstallWatchServiceOptions {
+                    debounce_ms,
+                    quiet,
+                    debug,
+                    debug_log_file: debug_log_file.clone(),
+                };
+                daemon::install_watch_service(&cfg, &options)?;
+                daemon::start_watch_service(&cfg)?;
+                print_service_status(&cfg)?;
                 return Ok(());
             }
             let log_mode = if quiet {
@@ -173,6 +225,61 @@ fn main() -> std::io::Result<()> {
                 "watch-start",
             )?;
             watch::watch(&cfg, debounce_ms, log_mode)
+        }
+        Commands::Status => {
+            logging::debug("command=status");
+            let cfg = config::Config::load_or_default()?;
+            print_service_status(&cfg)
+        }
+        Commands::Daemon { command } => {
+            let cfg = config::Config::load_or_default()?;
+            match command {
+                DaemonCommand::Install {
+                    debounce_ms,
+                    quiet,
+                    confirm_versions,
+                } => {
+                    logging::debug(&format!(
+                        "command=daemon.install debounce_ms={debounce_ms} quiet={quiet} confirm_versions={confirm_versions}"
+                    ));
+                    let mismatch = versions::check_versions(&cfg);
+                    if confirm_versions && mismatch && !versions::confirm_version_mismatch()? {
+                        return Ok(());
+                    }
+                    let options = daemon::InstallWatchServiceOptions {
+                        debounce_ms,
+                        quiet,
+                        debug,
+                        debug_log_file: debug_log_file.clone(),
+                    };
+                    daemon::install_watch_service(&cfg, &options)?;
+                    print_service_status(&cfg)
+                }
+                DaemonCommand::Start => {
+                    logging::debug("command=daemon.start");
+                    daemon::start_watch_service(&cfg)?;
+                    print_service_status(&cfg)
+                }
+                DaemonCommand::Stop => {
+                    logging::debug("command=daemon.stop");
+                    daemon::stop_watch_service(&cfg)?;
+                    print_service_status(&cfg)
+                }
+                DaemonCommand::Restart => {
+                    logging::debug("command=daemon.restart");
+                    daemon::restart_watch_service(&cfg)?;
+                    print_service_status(&cfg)
+                }
+                DaemonCommand::Status => {
+                    logging::debug("command=daemon.status");
+                    print_service_status(&cfg)
+                }
+                DaemonCommand::Uninstall => {
+                    logging::debug("command=daemon.uninstall");
+                    daemon::uninstall_watch_service(&cfg)?;
+                    print_service_status(&cfg)
+                }
+            }
         }
         Commands::History { limit } => {
             logging::debug(&format!("command=history limit={limit}"));
@@ -225,6 +332,25 @@ fn main() -> std::io::Result<()> {
             Ok(())
         }
     }
+}
+
+#[cfg(all(not(any(test, coverage)), not(windows)))]
+fn print_service_status(cfg: &config::Config) -> std::io::Result<()> {
+    let status = daemon::watch_service_status(cfg)?;
+    println!("status: manager={}", status.manager.as_str());
+    println!("status: service={}", status.service_name);
+    println!("status: state={}", status.state.as_str());
+    println!(
+        "status: service_file={}",
+        status.paths.service_file.display()
+    );
+    if let Some(log_file) = status.paths.log_file.as_ref() {
+        println!("status: log_file={}", log_file.display());
+    }
+    if let Some(logs_hint) = status.logs_hint.as_ref() {
+        println!("status: logs={logs_hint}");
+    }
+    Ok(())
 }
 
 #[cfg(any(test, coverage))]

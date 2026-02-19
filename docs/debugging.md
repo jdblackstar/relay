@@ -28,6 +28,40 @@ Override path:
 relay --debug --debug-log-file /tmp/relay.log watch
 ```
 
+## Background service (native)
+
+Install/update service definition:
+
+```sh
+relay daemon install --debounce-ms 300 --quiet
+```
+
+Start/stop/restart:
+
+```sh
+relay daemon start
+relay daemon stop
+relay daemon restart
+```
+
+Show status:
+
+```sh
+relay daemon status
+relay status
+```
+
+Quick path (install + start):
+
+```sh
+relay watch -d -q
+```
+
+Service manager by OS:
+
+- macOS: launchd (`~/Library/LaunchAgents/dev.jdblackstar.relay.watch.plist`)
+- Linux: systemd user unit (`~/.config/systemd/user/relay-watch.service`)
+
 ## Rollback workflow
 
 1. Identify event:
@@ -36,6 +70,10 @@ relay --debug --debug-log-file /tmp/relay.log watch
    - `relay rollback <event-id>`
 3. If files were edited after the event and rollback refuses:
    - `relay rollback <event-id> --force`
+
+Rollback restores the paths written by the target event. If a watch-triggered
+event used one tool file as the source of truth and only wrote mirrored copies,
+rollback restores those mirrored targets and may not modify the source file.
 
 ## Common checks
 

@@ -455,6 +455,7 @@ dependencies = [
  "dialoguer",
  "dirs",
  "filetime",
+ "libc",
  "notify",
  "serde",
  "tempfile",
