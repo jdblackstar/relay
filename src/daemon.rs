@@ -401,7 +401,10 @@ fn escape_xml(value: &str) -> String {
 }
 
 fn escape_systemd(value: &str) -> String {
-    value.replace('\\', "\\\\").replace('"', "\\\"")
+    value
+        .replace('%', "%%")
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
 }
 
 fn write_atomic(path: &Path, body: &[u8]) -> io::Result<()> {
@@ -587,6 +590,21 @@ mod tests {
         ));
         assert!(body.contains("Restart=always"));
         assert!(body.contains("WantedBy=default.target"));
+    }
+
+    #[test]
+    fn systemd_unit_escapes_percent_for_execstart_and_environment() {
+        let mut env = BTreeMap::new();
+        env.insert("RELAY_HOME".to_string(), "/tmp/50%relay".to_string());
+        let body = render_systemd_unit(
+            Path::new("/usr/local/bin/relay%bin"),
+            &["watch".to_string(), "--debug-log-file".to_string(), "/tmp/relay%log".to_string()],
+            &env,
+        );
+        assert!(body.contains(
+            "ExecStart=\"/usr/local/bin/relay%%bin\" \"watch\" \"--debug-log-file\" \"/tmp/relay%%log\""
+        ));
+        assert!(body.contains("Environment=\"RELAY_HOME=/tmp/50%%relay\""));
     }
 
     #[test]
