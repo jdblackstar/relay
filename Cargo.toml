@@ -2,6 +2,7 @@
 name = "relay"
 version = "0.1.2"
 edition = "2021"
+license = "MIT"
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ["cfg(coverage)"] }
