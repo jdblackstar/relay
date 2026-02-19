@@ -368,7 +368,7 @@ fn render_systemd_unit(
     exec_parts.extend(args.iter().cloned());
     let exec_start = exec_parts
         .into_iter()
-        .map(|arg| format!("\"{}\"", escape_systemd(&arg)))
+        .map(|arg| format!("\"{}\"", escape_systemd_exec_arg(&arg)))
         .collect::<Vec<_>>()
         .join(" ");
 
@@ -384,7 +384,7 @@ fn render_systemd_unit(
     for (key, value) in service_env {
         out.push_str(&format!(
             "Environment=\"{}\"\n",
-            escape_systemd(&format!("{key}={value}"))
+            escape_systemd_environment(&format!("{key}={value}"))
         ));
     }
     out.push_str("\n[Install]\n");
@@ -401,10 +401,17 @@ fn escape_xml(value: &str) -> String {
         .replace('\'', "&apos;")
 }
 
-fn escape_systemd(value: &str) -> String {
+fn escape_systemd_exec_arg(value: &str) -> String {
     value
         .replace('%', "%%")
         .replace('$', "$$")
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+}
+
+fn escape_systemd_environment(value: &str) -> String {
+    value
+        .replace('%', "%%")
         .replace('\\', "\\\\")
         .replace('"', "\\\"")
 }
@@ -597,7 +604,7 @@ mod tests {
     }
 
     #[test]
-    fn systemd_unit_escapes_percent_and_dollar_for_execstart_and_environment() {
+    fn systemd_unit_escapes_execstart_dollar_but_preserves_environment_dollar() {
         let mut env = BTreeMap::new();
         env.insert("RELAY_HOME".to_string(), "/tmp/50%relay$home".to_string());
         let body = render_systemd_unit(
@@ -612,7 +619,7 @@ mod tests {
         assert!(body.contains(
             "ExecStart=\"/usr/local/bin/relay%%bin$$test\" \"watch\" \"--debug-log-file\" \"/tmp/relay%%log$$arg\""
         ));
-        assert!(body.contains("Environment=\"RELAY_HOME=/tmp/50%%relay$$home\""));
+        assert!(body.contains("Environment=\"RELAY_HOME=/tmp/50%%relay$home\""));
     }
 
     #[test]
