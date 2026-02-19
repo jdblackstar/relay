@@ -214,15 +214,12 @@ pub fn watch_service_status(cfg: &Config) -> io::Result<ServiceStatus> {
 }
 
 fn service_manager() -> io::Result<ServiceManager> {
-    #[cfg(target_os = "macos")]
-    {
+    if cfg!(target_os = "macos") {
         return Ok(ServiceManager::Launchd);
     }
-    #[cfg(target_os = "linux")]
-    {
+    if cfg!(target_os = "linux") {
         return Ok(ServiceManager::SystemdUser);
     }
-    #[allow(unreachable_code)]
     Err(io::Error::new(
         io::ErrorKind::Unsupported,
         "native daemon management is only supported on macOS and Linux",
