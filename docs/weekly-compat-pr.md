@@ -99,8 +99,8 @@ Create `~/Library/LaunchAgents/dev.relay.weekly-compat.plist`:
 
     <key>StartCalendarInterval</key>
     <dict>
-      <key>Weekday</key><integer>2</integer>
-      <key>Hour</key><integer>9</integer>
+      <key>Weekday</key><integer>1</integer>
+      <key>Hour</key><integer>5</integer>
       <key>Minute</key><integer>0</integer>
     </dict>
 
@@ -122,4 +122,4 @@ launchctl unload ~/Library/LaunchAgents/dev.relay.weekly-compat.plist 2>/dev/nul
 launchctl load ~/Library/LaunchAgents/dev.relay.weekly-compat.plist
 ```
 
-`Weekday=2` is Monday in launchd calendar format.
+`Weekday=1` is Monday in launchd calendar format (0=Sunday).
