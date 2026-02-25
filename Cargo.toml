@@ -3,6 +3,11 @@ name = "relay"
 version = "0.1.3"
 edition = "2021"
 license = "MIT"
+description = "Minimal CLI to sync commands, skills, and agents across AI coding tools"
+repository = "https://github.com/jdblackstar/relay"
+homepage = "https://github.com/jdblackstar/relay"
+keywords = ["cli", "sync", "commands", "skills", "ai"]
+categories = ["command-line-utilities"]
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ["cfg(coverage)"] }

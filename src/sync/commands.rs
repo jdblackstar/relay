@@ -4,7 +4,7 @@ use super::shared::{
     TOOL_CENTRAL,
 };
 use super::{ExecutionMode, LogMode, SyncStats};
-use crate::config::{Config, TOOL_CLAUDE, TOOL_CODEX, TOOL_OPENCODE};
+use crate::config::{Config, TOOL_CLAUDE, TOOL_CODEX, TOOL_CURSOR, TOOL_OPENCODE};
 use crate::history::HistoryRecorder;
 use std::collections::HashSet;
 use std::fs;
@@ -26,20 +26,23 @@ pub(crate) fn sync_commands_with_mode(
     fs::create_dir_all(&cfg.central_dir)?;
 
     let claude_enabled = cfg.tool_enabled(TOOL_CLAUDE) && cfg.claude_dir.exists();
+    let cursor_enabled = cfg.tool_enabled(TOOL_CURSOR) && cfg.cursor_dir.exists();
     let opencode_enabled = cfg.tool_enabled(TOOL_OPENCODE) && cfg.opencode_commands_dir.exists();
     let codex_enabled = cfg.tool_enabled(TOOL_CODEX) && cfg.codex_dir.exists();
 
     let claude = list_if(claude_enabled, &cfg.claude_dir, list_files)?;
+    let cursor = list_if(cursor_enabled, &cfg.cursor_dir, list_files)?;
     let opencode = list_if(opencode_enabled, &cfg.opencode_commands_dir, list_files)?;
     let codex = list_if(codex_enabled, &cfg.codex_dir, list_codex_files)?;
     let central = list_files(&cfg.central_dir)?;
 
-    let names = collect_names(&[&claude, &opencode, &codex, &central]);
+    let names = collect_names(&[&claude, &cursor, &opencode, &codex, &central]);
     for name in names {
         let mut variants: Vec<MarkdownVariant> = Vec::new();
         for (tool, map) in [
             (TOOL_CENTRAL, &central),
             (TOOL_CLAUDE, &claude),
+            (TOOL_CURSOR, &cursor),
             (TOOL_OPENCODE, &opencode),
             (TOOL_CODEX, &codex),
         ] {
@@ -62,6 +65,7 @@ pub(crate) fn sync_commands_with_mode(
         for (tool, enabled, base_dir) in [
             (TOOL_CENTRAL, true, &cfg.central_dir),
             (TOOL_CLAUDE, claude_enabled, &cfg.claude_dir),
+            (TOOL_CURSOR, cursor_enabled, &cfg.cursor_dir),
             (TOOL_OPENCODE, opencode_enabled, &cfg.opencode_commands_dir),
             (TOOL_CODEX, codex_enabled, &cfg.codex_dir),
         ] {
@@ -232,6 +236,34 @@ mod tests {
         assert!(read_frontmatter(&central)?
             .unwrap_or_default()
             .contains("name: central"));
+        Ok(())
+    }
+
+    #[test]
+    fn sync_commands_cursor_wins() -> io::Result<()> {
+        let (_tmp, cfg) = setup()?;
+
+        let claude = cfg.claude_dir.join("cursor-check.md");
+        let cursor = cfg.cursor_dir.join("cursor-check.md");
+        let codex = cfg.codex_dir.join("cursor-check.md");
+
+        write_plain(&claude, &doc("claude", "Old"))?;
+        write_plain(&cursor, &doc("cursor", "Newest from cursor"))?;
+        write_plain(&codex, &doc("codex", "Old"))?;
+
+        crate::sync::test_support::set_mtime(&cursor, 2_400_000_100)?;
+
+        sync_commands(&cfg, LogMode::Quiet)?;
+
+        assert_eq!(read_body(&claude)?, "Newest from cursor");
+        assert_eq!(read_body(&cursor)?, "Newest from cursor");
+        assert_eq!(read_body(&codex)?, "Newest from cursor");
+        assert!(read_frontmatter(&claude)?
+            .unwrap_or_default()
+            .contains("name: cursor"));
+        assert!(read_frontmatter(&codex)?
+            .unwrap_or_default()
+            .contains("name: cursor"));
         Ok(())
     }
 }

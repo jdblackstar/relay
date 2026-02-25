@@ -3,13 +3,6 @@
 Minimal CLI to keep slash commands, skills, and agent/rule files aligned
 across tools while mirroring results into `~/.config/relay`.
 
-## Project status
-
-relay is stable enough for real daily use, but you should still dogfood it on
-your own setup before broad announcement. A practical baseline is 1-2 weeks of
-daily use with `sync --plan`, `sync --apply`, and `watch` in your normal tool
-flow.
-
 ## Defaults
 
 Commands:
@@ -74,6 +67,7 @@ relay [--debug] [--debug-log-file <path>] rollback [-l|--latest] [-f|--force]
 `relay watch --daemon` installs/updates and starts a native background service:
 - macOS: `launchd` user agent
 - Linux: `systemd --user` service
+
 `relay daemon` exposes explicit lifecycle control for that service.
 `relay status` is shorthand for `relay daemon status`.
 Init detects installed tool directories and lets you pick which ones to sync.
@@ -129,6 +123,20 @@ See `docs/debugging.md` for the full switch-over steps.
 
 For an isolated end-to-end smoke test using Apple's `container`, see
 `docs/smoke-container.md`.
+
+## Weekly Compatibility PRs
+
+To automate weekly tool upgrades + validation and open a PR from a local
+machine, use:
+
+```sh
+./scripts/weekly-compat-pr.sh
+```
+
+On failure, it can also open a GitHub issue with detected versions and logs.
+Compatibility snapshot uses a moving `[tested_latest]` and a manual
+`[min_supported]` floor in `docs/compat/verified-versions.toml`.
+Setup and launchd scheduling guide: `docs/weekly-compat-pr.md`.
 
 ## Notes
 
@@ -202,8 +210,8 @@ Relay also keeps a central store in `~/.config/relay` with:
 - Frontmatter compatibility is best-effort; relay does not rewrite or validate
   provider-specific frontmatter yet. A future `relay import`/`relay lint` will
   help normalize and validate per tool.
-- Cursor is listed in config, but relay does not currently sync Cursor because
-  it only supports project-scoped rules and partial skills.
+- Cursor commands are synced; skills, agents, and rules are not supported
+  because Cursor only offers project-scoped rules and partial skills.
 
 ## Verified Versions
 
