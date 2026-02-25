@@ -210,8 +210,8 @@ Relay also keeps a central store in `~/.config/relay` with:
 - Frontmatter compatibility is best-effort; relay does not rewrite or validate
   provider-specific frontmatter yet. A future `relay import`/`relay lint` will
   help normalize and validate per tool.
-- Cursor is listed in config, but relay does not currently sync Cursor because
-  it only supports project-scoped rules and partial skills.
+- Cursor commands are synced; skills, agents, and rules are not supported
+  because Cursor only offers project-scoped rules and partial skills.
 
 ## Verified Versions
 

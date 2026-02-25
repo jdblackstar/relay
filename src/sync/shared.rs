@@ -426,6 +426,7 @@ pub(crate) fn file_mtime_value_from_meta(meta: &fs::Metadata) -> u128 {
 
 pub(crate) fn tool_order(tool: &str) -> u8 {
     match tool {
+        crate::config::TOOL_CURSOR => 4,
         crate::config::TOOL_CLAUDE => 3,
         crate::config::TOOL_CODEX => 2,
         crate::config::TOOL_OPENCODE => 1,
@@ -682,6 +683,7 @@ mod tests {
     #[test]
     fn misc_helpers_cover_branches() {
         assert_eq!(file_mtime_value(Path::new("/nope")), 0);
+        assert_eq!(tool_order(crate::config::TOOL_CURSOR), 4);
         assert_eq!(tool_order("unknown"), 0);
         log_action(LogMode::Actions, "hello");
         log_action(LogMode::Quiet, "quiet");

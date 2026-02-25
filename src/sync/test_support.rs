@@ -1,4 +1,4 @@
-use crate::config::{Config, TOOL_CLAUDE, TOOL_CODEX, TOOL_OPENCODE};
+use crate::config::{Config, TOOL_CLAUDE, TOOL_CODEX, TOOL_CURSOR, TOOL_OPENCODE};
 use crate::sync::shared::read_markdown;
 use filetime::{set_file_mtime, FileTime};
 use std::fs;
@@ -11,6 +11,7 @@ pub(crate) fn make_config(tmp: &TempDir) -> Config {
         enabled_tools: vec![
             TOOL_CLAUDE.to_string(),
             TOOL_CODEX.to_string(),
+            TOOL_CURSOR.to_string(),
             TOOL_OPENCODE.to_string(),
         ],
         verified_versions: std::collections::HashMap::new(),
@@ -35,6 +36,7 @@ pub(crate) fn ensure_tool_dirs(cfg: &Config) -> io::Result<()> {
     for dir in [
         &cfg.claude_dir,
         &cfg.claude_skills_dir,
+        &cfg.cursor_dir,
         &cfg.opencode_commands_dir,
         &cfg.opencode_skills_dir,
         &cfg.codex_dir,
