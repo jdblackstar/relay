@@ -545,6 +545,7 @@ mod tests {
     use std::collections::HashMap;
     use std::env;
     use std::ffi::OsString;
+    use std::fs;
     use tempfile::TempDir;
 
     fn make_config(tmp: &TempDir) -> Config {
@@ -627,6 +628,38 @@ mod tests {
         let tmp = TempDir::new()?;
         let cfg = make_config(&tmp);
         assert_eq!(runtime_dir(&cfg)?, tmp.path().join("relay/runtime"));
+        Ok(())
+    }
+
+    #[test]
+    fn runtime_dir_uses_expanded_config_expression() -> io::Result<()> {
+        let _lock = crate::ENV_LOCK.lock().unwrap();
+        let prev_relay_home = env::var_os("RELAY_HOME");
+        let prev_xdg_config_home = env::var_os("XDG_CONFIG_HOME");
+
+        let tmp = TempDir::new()?;
+        let home = tmp.path().join("home");
+        let xdg = tmp.path().join("xdg");
+        env::set_var("RELAY_HOME", &home);
+        env::set_var("XDG_CONFIG_HOME", &xdg);
+
+        let outcome = (|| -> io::Result<PathBuf> {
+            fs::create_dir_all(home.join(".config/relay"))?;
+            fs::create_dir_all(&xdg)?;
+            let config_path = Config::config_path()?;
+            fs::write(
+                &config_path,
+                "central_dir = \"${XDG_CONFIG_HOME:-$HOME/.config}/relay/commands\"\n",
+            )?;
+            let cfg = Config::load_or_default()?;
+            runtime_dir(&cfg)
+        })();
+        restore_env_var("RELAY_HOME", prev_relay_home);
+        restore_env_var("XDG_CONFIG_HOME", prev_xdg_config_home);
+
+        let runtime = outcome?;
+        assert_eq!(runtime, xdg.join("relay/runtime"));
+        assert!(!runtime.to_string_lossy().contains("${"));
         Ok(())
     }
 
