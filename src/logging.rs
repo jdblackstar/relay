@@ -53,7 +53,7 @@ fn resolve_log_path(cli_path: Option<&Path>) -> PathBuf {
             return PathBuf::from(trimmed);
         }
     }
-    if let Some(home) = resolve_home_dir() {
+    if let Ok(Some(home)) = resolve_home_dir() {
         return home.join(".config/relay/logs/relay-debug.log");
     }
     std::env::temp_dir().join("relay-debug.log")

@@ -249,8 +249,8 @@ fn resolve_tool_home(home: &Path, var: &str, default_suffix: &str) -> io::Result
     }
 }
 
-pub(crate) fn resolve_home_dir() -> Option<PathBuf> {
-    resolve_home_dir_checked().ok().flatten()
+pub(crate) fn resolve_home_dir() -> io::Result<Option<PathBuf>> {
+    resolve_home_dir_checked()
 }
 
 pub(crate) fn resolve_home_dir_checked() -> io::Result<Option<PathBuf>> {
@@ -976,12 +976,24 @@ opencode_dir = "/tmp/opencode/other"
     }
 
     #[test]
-    fn resolve_home_dir_falls_back_to_dirs() {
+    fn resolve_home_dir_falls_back_to_dirs() -> io::Result<()> {
         let _lock = env_lock();
         set_env("RELAY_HOME", None);
         set_env("RELAY_NO_HOME", None);
-        let resolved = resolve_home_dir();
+        let resolved = resolve_home_dir()?;
         assert_eq!(resolved, dirs::home_dir());
+        Ok(())
+    }
+
+    #[test]
+    fn resolve_home_dir_returns_invalid_config_error() {
+        let _lock = env_lock();
+        set_env("RELAY_HOME", Some("${UNSUPPORTED_VAR}/relay"));
+        let err = resolve_home_dir().unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("invalid RELAY_HOME path override"));
+        assert!(err.to_string().contains("unsupported shell variable"));
+        set_env("RELAY_HOME", None);
     }
 
     #[test]
