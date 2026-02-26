@@ -649,6 +649,7 @@ mod tests {
             fs::create_dir_all(home.join(".config/relay"))?;
             fs::create_dir_all(&xdg)?;
             let config_path = Config::config_path()?;
+            fs::create_dir_all(config_path.parent().expect("config path has parent"))?;
             fs::write(
                 &config_path,
                 "central_dir = \"${XDG_CONFIG_HOME:-$HOME/.config}/relay/commands\"\n",
