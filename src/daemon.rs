@@ -11,13 +11,15 @@ use std::process::{Command, Output};
 const LAUNCHD_LABEL: &str = "dev.jdblackstar.relay.watch";
 const SYSTEMD_UNIT_NAME: &str = "relay-watch.service";
 const WATCH_LOG_FILE: &str = "watch.log";
-const SERVICE_ENV_KEYS: [&str; 6] = [
+const SERVICE_ENV_KEYS: [&str; 8] = [
     "RELAY_HOME",
     "CODEX_HOME",
     "CLAUDE_HOME",
     "OPENCODE_HOME",
     "CURSOR_HOME",
     "RELAY_CONFIG_DIR",
+    "XDG_CONFIG_HOME",
+    "HOME",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -682,6 +684,29 @@ mod tests {
                 "--debug-log-file".to_string(),
                 "/tmp/relay.log".to_string()
             ]
+        );
+    }
+
+    #[test]
+    fn service_env_vars_include_xdg_config_home_and_home() {
+        let _lock = crate::ENV_LOCK.lock().unwrap();
+        let prev_xdg_config_home = env::var_os("XDG_CONFIG_HOME");
+        let prev_home = env::var_os("HOME");
+        env::set_var("XDG_CONFIG_HOME", "/tmp/custom-xdg-config");
+        env::set_var("HOME", "/tmp/custom-home");
+
+        let vars = service_env_vars();
+
+        restore_env_var("XDG_CONFIG_HOME", prev_xdg_config_home);
+        restore_env_var("HOME", prev_home);
+
+        assert_eq!(
+            vars.get("XDG_CONFIG_HOME").map(String::as_str),
+            Some("/tmp/custom-xdg-config")
+        );
+        assert_eq!(
+            vars.get("HOME").map(String::as_str),
+            Some("/tmp/custom-home")
         );
     }
 
