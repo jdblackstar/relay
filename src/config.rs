@@ -235,7 +235,8 @@ fn resolve_tool_home(home: &Path, var: &str, default_suffix: &str) -> io::Result
         .filter(|raw| !raw.is_empty());
     match value.as_deref() {
         Some(raw) => {
-            let xdg_config_home = resolve_xdg_config_home_checked(Some(home))?;
+            let os_home = os_home_dir();
+            let xdg_config_home = resolve_xdg_config_home_checked(os_home.as_deref())?;
             normalize_path_with_context(raw, Some(home), xdg_config_home.as_deref()).map_err(
                 |err| {
                     io::Error::new(
@@ -295,7 +296,8 @@ fn resolve_config_dir_checked() -> io::Result<Option<PathBuf>> {
             return Ok(None);
         }
         let home = resolve_home_dir_checked()?;
-        let xdg_config_home = resolve_xdg_config_home_checked(home.as_deref())?;
+        let os_home = os_home_dir();
+        let xdg_config_home = resolve_xdg_config_home_checked(os_home.as_deref())?;
         return normalize_path_with_context(trimmed, home.as_deref(), xdg_config_home.as_deref())
             .map(Some)
             .map_err(|err| {
@@ -380,7 +382,8 @@ fn normalize_optional_config_path(
 
 fn normalize_path_with_current_context(raw: &str) -> io::Result<PathBuf> {
     let home = resolve_home_dir_checked()?;
-    let xdg_config_home = resolve_xdg_config_home_checked(home.as_deref())?;
+    let os_home = os_home_dir();
+    let xdg_config_home = resolve_xdg_config_home_checked(os_home.as_deref())?;
     normalize_path_with_context(raw, home.as_deref(), xdg_config_home.as_deref())
 }
 
@@ -634,6 +637,30 @@ mod tests {
     }
 
     #[test]
+    fn default_paths_expands_xdg_config_home_with_os_home() -> io::Result<()> {
+        let _lock = env_lock();
+        let tmp = TempDir::new()?;
+        let relay_home = tmp.path().join("relay-home");
+        let os_home = tmp.path().join("os-home");
+        fs::create_dir_all(&relay_home)?;
+        fs::create_dir_all(os_home.join(".xdg"))?;
+        let original_home = env::var("HOME").ok();
+        set_env("HOME", Some(os_home.to_string_lossy().as_ref()));
+        set_env("RELAY_HOME", Some(relay_home.to_string_lossy().as_ref()));
+        set_env("XDG_CONFIG_HOME", Some("$HOME/.xdg"));
+        set_env("CODEX_HOME", Some("${XDG_CONFIG_HOME}/codex"));
+
+        let cfg = Config::default_paths()?;
+        assert_eq!(cfg.codex_dir, os_home.join(".xdg/codex/prompts"));
+
+        set_env("RELAY_HOME", None);
+        set_env("XDG_CONFIG_HOME", None);
+        set_env("CODEX_HOME", None);
+        set_env("HOME", original_home.as_deref());
+        Ok(())
+    }
+
+    #[test]
     fn config_path_uses_home_or_config_dir() -> io::Result<()> {
         let _lock = env_lock();
         let tmp = TempDir::new()?;
@@ -654,6 +681,31 @@ mod tests {
 
         set_env("RELAY_CONFIG_DIR", None);
         set_env("RELAY_NO_HOME", None);
+        Ok(())
+    }
+
+    #[test]
+    fn config_path_expands_xdg_config_home_with_os_home() -> io::Result<()> {
+        let _lock = env_lock();
+        let tmp = TempDir::new()?;
+        let os_home = tmp.path().join("os-home");
+        fs::create_dir_all(os_home.join(".xdg"))?;
+        let original_home = env::var("HOME").ok();
+        set_env("HOME", Some(os_home.to_string_lossy().as_ref()));
+        set_env("RELAY_NO_HOME", Some("1"));
+        set_env("RELAY_CONFIG_DIR", Some("${XDG_CONFIG_HOME}/relay-config"));
+        set_env("XDG_CONFIG_HOME", Some("$HOME/.xdg"));
+
+        let config_path = Config::config_path()?;
+        assert_eq!(
+            config_path,
+            os_home.join(".xdg/relay-config/relay/config.toml")
+        );
+
+        set_env("RELAY_NO_HOME", None);
+        set_env("RELAY_CONFIG_DIR", None);
+        set_env("XDG_CONFIG_HOME", None);
+        set_env("HOME", original_home.as_deref());
         Ok(())
     }
 
@@ -727,6 +779,34 @@ central_dir = "${XDG_CONFIG_HOME:-$HOME/.config}/relay/commands"
 
         set_env("RELAY_HOME", None);
         set_env("XDG_CONFIG_HOME", None);
+        Ok(())
+    }
+
+    #[test]
+    fn load_or_default_expands_xdg_config_home_with_os_home() -> io::Result<()> {
+        let _lock = env_lock();
+        let tmp = TempDir::new()?;
+        let relay_home = tmp.path().join("relay-home");
+        let os_home = tmp.path().join("os-home");
+        fs::create_dir_all(relay_home.join(".config/relay"))?;
+        fs::create_dir_all(os_home.join(".xdg"))?;
+        let original_home = env::var("HOME").ok();
+        set_env("HOME", Some(os_home.to_string_lossy().as_ref()));
+        set_env("RELAY_HOME", Some(relay_home.to_string_lossy().as_ref()));
+        set_env("XDG_CONFIG_HOME", Some("$HOME/.xdg"));
+
+        let config_path = Config::config_path()?;
+        let config_body = r#"
+central_dir = "${XDG_CONFIG_HOME}/relay/commands"
+"#;
+        fs::write(&config_path, config_body)?;
+
+        let cfg = Config::load_or_default()?;
+        assert_eq!(cfg.central_dir, os_home.join(".xdg/relay/commands"));
+
+        set_env("RELAY_HOME", None);
+        set_env("XDG_CONFIG_HOME", None);
+        set_env("HOME", original_home.as_deref());
         Ok(())
     }
 
