@@ -263,14 +263,19 @@ pub(crate) fn resolve_home_dir_checked() -> io::Result<Option<PathBuf>> {
             return Ok(None);
         }
         let os_home = os_home_dir();
-        return normalize_path_with_context(trimmed, os_home.as_deref(), None)
-            .map(Some)
-            .map_err(|err| {
-                io::Error::new(
-                    err.kind(),
-                    format!("invalid RELAY_HOME path override `{trimmed}`: {err}"),
-                )
-            });
+        let xdg_config_home = resolve_xdg_config_home_checked(os_home.as_deref())?;
+        return normalize_path_with_context(
+            trimmed,
+            os_home.as_deref(),
+            xdg_config_home.as_deref(),
+        )
+        .map(Some)
+        .map_err(|err| {
+            io::Error::new(
+                err.kind(),
+                format!("invalid RELAY_HOME path override `{trimmed}`: {err}"),
+            )
+        });
     }
     Ok(os_home_dir())
 }
@@ -977,6 +982,24 @@ opencode_dir = "/tmp/opencode/other"
         set_env("RELAY_NO_HOME", None);
         let resolved = resolve_home_dir();
         assert_eq!(resolved, dirs::home_dir());
+    }
+
+    #[test]
+    fn resolve_home_dir_expands_relay_home_with_xdg_config_home() -> io::Result<()> {
+        let _lock = env_lock();
+        let tmp = TempDir::new()?;
+        let xdg = tmp.path().join("xdg");
+        fs::create_dir_all(&xdg)?;
+        set_env("XDG_CONFIG_HOME", Some(xdg.to_string_lossy().as_ref()));
+        set_env("RELAY_HOME", Some("${XDG_CONFIG_HOME}/relay"));
+
+        let resolved = resolve_home_dir_checked()?
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "home should resolve"))?;
+        assert_eq!(resolved, xdg.join("relay"));
+
+        set_env("RELAY_HOME", None);
+        set_env("XDG_CONFIG_HOME", None);
+        Ok(())
     }
 
     #[test]
