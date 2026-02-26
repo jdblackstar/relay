@@ -53,7 +53,7 @@ struct PartialConfig {
 
 impl Config {
     pub fn default_paths() -> io::Result<Self> {
-        let home = resolve_home_dir_checked()?.ok_or_else(|| {
+        let home = resolve_home_dir()?.ok_or_else(|| {
             io::Error::new(io::ErrorKind::NotFound, "could not resolve home directory")
         })?;
         let codex_root = resolve_tool_home(&home, "CODEX_HOME", ".codex")?;
@@ -86,7 +86,7 @@ impl Config {
     }
 
     pub fn config_path() -> io::Result<PathBuf> {
-        if let Some(home) = resolve_home_dir_checked()? {
+        if let Some(home) = resolve_home_dir()? {
             return Ok(home.join(".config/relay/config.toml"));
         }
         let config_dir = resolve_config_dir_checked()?.ok_or_else(|| {
@@ -251,10 +251,6 @@ fn resolve_tool_home(home: &Path, var: &str, default_suffix: &str) -> io::Result
 }
 
 pub(crate) fn resolve_home_dir() -> io::Result<Option<PathBuf>> {
-    resolve_home_dir_checked()
-}
-
-pub(crate) fn resolve_home_dir_checked() -> io::Result<Option<PathBuf>> {
     if env::var("RELAY_NO_HOME").ok().as_deref() == Some("1") {
         return Ok(None);
     }
@@ -295,7 +291,7 @@ fn resolve_config_dir_checked() -> io::Result<Option<PathBuf>> {
         if trimmed.is_empty() {
             return Ok(None);
         }
-        let home = resolve_home_dir_checked()?;
+        let home = resolve_home_dir()?;
         let os_home = os_home_dir();
         let xdg_config_home = resolve_xdg_config_home_checked(os_home.as_deref())?;
         return normalize_path_with_context(trimmed, home.as_deref(), xdg_config_home.as_deref())
@@ -381,7 +377,7 @@ fn normalize_optional_config_path(
 }
 
 fn normalize_path_with_current_context(raw: &str) -> io::Result<PathBuf> {
-    let home = resolve_home_dir_checked()?;
+    let home = resolve_home_dir()?;
     let os_home = os_home_dir();
     let xdg_config_home = resolve_xdg_config_home_checked(os_home.as_deref())?;
     normalize_path_with_context(raw, home.as_deref(), xdg_config_home.as_deref())
@@ -1085,7 +1081,7 @@ opencode_dir = "/tmp/opencode/other"
         set_env("XDG_CONFIG_HOME", Some(xdg.to_string_lossy().as_ref()));
         set_env("RELAY_HOME", Some("${XDG_CONFIG_HOME}/relay"));
 
-        let resolved = resolve_home_dir_checked()?
+        let resolved = resolve_home_dir()?
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "home should resolve"))?;
         assert_eq!(resolved, xdg.join("relay"));
 
