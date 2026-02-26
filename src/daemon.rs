@@ -11,13 +11,15 @@ use std::process::{Command, Output};
 const LAUNCHD_LABEL: &str = "dev.jdblackstar.relay.watch";
 const SYSTEMD_UNIT_NAME: &str = "relay-watch.service";
 const WATCH_LOG_FILE: &str = "watch.log";
-const SERVICE_ENV_KEYS: [&str; 6] = [
+const SERVICE_ENV_KEYS: [&str; 8] = [
     "RELAY_HOME",
     "CODEX_HOME",
     "CLAUDE_HOME",
     "OPENCODE_HOME",
     "CURSOR_HOME",
     "RELAY_CONFIG_DIR",
+    "XDG_CONFIG_HOME",
+    "HOME",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -545,6 +547,7 @@ mod tests {
     use std::collections::HashMap;
     use std::env;
     use std::ffi::OsString;
+    use std::fs;
     use tempfile::TempDir;
 
     fn make_config(tmp: &TempDir) -> Config {
@@ -631,6 +634,39 @@ mod tests {
     }
 
     #[test]
+    fn runtime_dir_uses_expanded_config_expression() -> io::Result<()> {
+        let _lock = crate::ENV_LOCK.lock().unwrap();
+        let prev_relay_home = env::var_os("RELAY_HOME");
+        let prev_xdg_config_home = env::var_os("XDG_CONFIG_HOME");
+
+        let tmp = TempDir::new()?;
+        let home = tmp.path().join("home");
+        let xdg = tmp.path().join("xdg");
+        env::set_var("RELAY_HOME", &home);
+        env::set_var("XDG_CONFIG_HOME", &xdg);
+
+        let outcome = (|| -> io::Result<PathBuf> {
+            fs::create_dir_all(home.join(".config/relay"))?;
+            fs::create_dir_all(&xdg)?;
+            let config_path = Config::config_path()?;
+            fs::create_dir_all(config_path.parent().expect("config path has parent"))?;
+            fs::write(
+                &config_path,
+                "central_dir = \"${XDG_CONFIG_HOME:-$HOME/.config}/relay/commands\"\n",
+            )?;
+            let cfg = Config::load_or_default()?;
+            runtime_dir(&cfg)
+        })();
+        restore_env_var("RELAY_HOME", prev_relay_home);
+        restore_env_var("XDG_CONFIG_HOME", prev_xdg_config_home);
+
+        let runtime = outcome?;
+        assert_eq!(runtime, xdg.join("relay/runtime"));
+        assert!(!runtime.to_string_lossy().contains("${"));
+        Ok(())
+    }
+
+    #[test]
     fn watch_args_include_requested_flags() {
         let args = watch_args(&InstallWatchServiceOptions {
             debounce_ms: 450,
@@ -649,6 +685,29 @@ mod tests {
                 "--debug-log-file".to_string(),
                 "/tmp/relay.log".to_string()
             ]
+        );
+    }
+
+    #[test]
+    fn service_env_vars_include_xdg_config_home_and_home() {
+        let _lock = crate::ENV_LOCK.lock().unwrap();
+        let prev_xdg_config_home = env::var_os("XDG_CONFIG_HOME");
+        let prev_home = env::var_os("HOME");
+        env::set_var("XDG_CONFIG_HOME", "/tmp/custom-xdg-config");
+        env::set_var("HOME", "/tmp/custom-home");
+
+        let vars = service_env_vars();
+
+        restore_env_var("XDG_CONFIG_HOME", prev_xdg_config_home);
+        restore_env_var("HOME", prev_home);
+
+        assert_eq!(
+            vars.get("XDG_CONFIG_HOME").map(String::as_str),
+            Some("/tmp/custom-xdg-config")
+        );
+        assert_eq!(
+            vars.get("HOME").map(String::as_str),
+            Some("/tmp/custom-home")
         );
     }
 

@@ -40,6 +40,15 @@ Claude and OpenCode also read project commands from `.claude/commands/` and
 and `.opencode/skill/<name>/SKILL.md`; relay currently syncs global locations
 only.
 
+### XDG Notes
+
+- Relay follows `XDG_CONFIG_HOME` for config-style paths.
+- If `XDG_CONFIG_HOME` is not set, relay uses `$HOME/.config`.
+- `XDG_HOME` is not a standard XDG variable.
+- In `config.toml` and path env vars, use concrete paths or supported forms:
+  `~`, `$HOME`, `${HOME}`, `$XDG_CONFIG_HOME`, `${XDG_CONFIG_HOME}`, and
+  `${XDG_CONFIG_HOME:-$HOME/.config}`.
+
 ## Install 
 
 ```sh
@@ -62,7 +71,9 @@ relay [--debug] [--debug-log-file <path>] rollback <event-id> [-f|--force]
 relay [--debug] [--debug-log-file <path>] rollback [-l|--latest] [-f|--force]
 ```
 
-`relay init` is interactive and writes config to `~/.config/relay/config.toml`.
+`relay init` is interactive and writes config to
+`$XDG_CONFIG_HOME/relay/config.toml` when `XDG_CONFIG_HOME` is set, otherwise
+`~/.config/relay/config.toml`.
 `relay watch` is event-driven with a small debounce and keeps copies aligned.
 `relay watch --daemon` installs/updates and starts a native background service:
 - macOS: `launchd` user agent

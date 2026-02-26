@@ -53,13 +53,14 @@ struct PartialConfig {
 
 impl Config {
     pub fn default_paths() -> io::Result<Self> {
-        let home = resolve_home_dir().ok_or_else(|| {
+        let home = resolve_home_dir()?.ok_or_else(|| {
             io::Error::new(io::ErrorKind::NotFound, "could not resolve home directory")
         })?;
-        let codex_root = resolve_tool_home(&home, "CODEX_HOME", ".codex");
-        let claude_root = resolve_tool_home(&home, "CLAUDE_HOME", ".claude");
-        let cursor_root = resolve_tool_home(&home, "CURSOR_HOME", ".cursor");
-        let opencode_root = resolve_tool_home(&home, "OPENCODE_HOME", ".config/opencode");
+        let relay_config_root = resolve_relay_config_root(&home)?;
+        let codex_root = resolve_tool_home(&home, "CODEX_HOME", ".codex")?;
+        let claude_root = resolve_tool_home(&home, "CLAUDE_HOME", ".claude")?;
+        let cursor_root = resolve_tool_home(&home, "CURSOR_HOME", ".cursor")?;
+        let opencode_root = resolve_tool_home(&home, "OPENCODE_HOME", ".config/opencode")?;
         Ok(Self {
             enabled_tools: vec![
                 TOOL_CLAUDE.to_string(),
@@ -68,10 +69,10 @@ impl Config {
                 TOOL_OPENCODE.to_string(),
             ],
             verified_versions: HashMap::new(),
-            central_dir: home.join(".config/relay/commands"),
-            central_skills_dir: home.join(".config/relay/skills"),
-            central_agents_dir: home.join(".config/relay/agents"),
-            central_rules_dir: home.join(".config/relay/rules"),
+            central_dir: relay_config_root.join("commands"),
+            central_skills_dir: relay_config_root.join("skills"),
+            central_agents_dir: relay_config_root.join("agents"),
+            central_rules_dir: relay_config_root.join("rules"),
             claude_dir: claude_root.join("commands"),
             claude_skills_dir: claude_root.join("skills"),
             cursor_dir: cursor_root.join("commands"),
@@ -86,10 +87,10 @@ impl Config {
     }
 
     pub fn config_path() -> io::Result<PathBuf> {
-        if let Some(home) = resolve_home_dir() {
-            return Ok(home.join(".config/relay/config.toml"));
+        if let Some(home) = resolve_home_dir()? {
+            return Ok(resolve_relay_config_root(&home)?.join("config.toml"));
         }
-        let config_dir = resolve_config_dir().ok_or_else(|| {
+        let config_dir = resolve_config_dir_checked()?.ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::NotFound,
                 "could not resolve config directory",
@@ -99,7 +100,7 @@ impl Config {
     }
 
     fn legacy_config_path() -> io::Result<PathBuf> {
-        let config_dir = resolve_config_dir().ok_or_else(|| {
+        let config_dir = resolve_config_dir_checked()?.ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::NotFound,
                 "could not resolve config directory",
@@ -128,6 +129,7 @@ impl Config {
             let raw = fs::read_to_string(&path)?;
             let cfg: PartialConfig = toml::from_str(&raw)
                 .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+            let cfg = normalize_partial_config_paths(cfg)?;
             let defaults = Self::default_paths()?;
             let legacy_command = cfg.opencode_dir.as_ref().and_then(|path| {
                 match path.file_name().and_then(|name| name.to_str()) {
@@ -224,58 +226,330 @@ fn normalize_versions(versions: HashMap<String, String>) -> HashMap<String, Stri
 }
 
 pub fn expand_tilde(input: &str) -> io::Result<PathBuf> {
-    if let Some(stripped) = input.strip_prefix("~/") {
-        let home = resolve_home_dir().ok_or_else(|| {
-            io::Error::new(io::ErrorKind::NotFound, "could not resolve home directory")
-        })?;
-        Ok(home.join(stripped))
-    } else {
-        Ok(PathBuf::from(input))
-    }
+    normalize_path_with_current_context(input)
 }
 
-fn resolve_tool_home(home: &Path, var: &str, default_suffix: &str) -> PathBuf {
+fn resolve_tool_home(home: &Path, var: &str, default_suffix: &str) -> io::Result<PathBuf> {
     let value = env::var(var)
         .ok()
         .map(|raw| raw.trim().to_string())
         .filter(|raw| !raw.is_empty());
     match value.as_deref() {
-        Some("~") => home.to_path_buf(),
         Some(raw) => {
-            if let Some(stripped) = raw.strip_prefix("~/") {
-                home.join(stripped)
-            } else {
-                PathBuf::from(raw)
-            }
+            let os_home = os_home_dir();
+            let xdg_config_home = resolve_xdg_config_home_checked(os_home.as_deref())?;
+            normalize_path_with_context(raw, Some(home), xdg_config_home.as_deref()).map_err(
+                |err| {
+                    io::Error::new(
+                        err.kind(),
+                        format!("invalid {var} path override `{raw}`: {err}"),
+                    )
+                },
+            )
         }
-        None => home.join(default_suffix),
+        None => Ok(home.join(default_suffix)),
     }
 }
 
-pub(crate) fn resolve_home_dir() -> Option<PathBuf> {
+pub(crate) fn resolve_home_dir() -> io::Result<Option<PathBuf>> {
     if env::var("RELAY_NO_HOME").ok().as_deref() == Some("1") {
-        return None;
+        return Ok(None);
     }
     if let Ok(path) = env::var("RELAY_HOME") {
-        if path.is_empty() {
-            return None;
+        let trimmed = path.trim();
+        if trimmed.is_empty() {
+            return Ok(None);
         }
-        return Some(PathBuf::from(path));
+        let os_home = os_home_dir();
+        let xdg_config_home = resolve_xdg_config_home_checked(os_home.as_deref())?;
+        return normalize_path_with_context(
+            trimmed,
+            os_home.as_deref(),
+            xdg_config_home.as_deref(),
+        )
+        .map(Some)
+        .map_err(|err| {
+            io::Error::new(
+                err.kind(),
+                format!("invalid RELAY_HOME path override `{trimmed}`: {err}"),
+            )
+        });
     }
-    dirs::home_dir()
+    Ok(os_home_dir())
 }
 
+#[cfg(test)]
 fn resolve_config_dir() -> Option<PathBuf> {
+    resolve_config_dir_checked().ok().flatten()
+}
+
+fn resolve_config_dir_checked() -> io::Result<Option<PathBuf>> {
     if env::var("RELAY_NO_CONFIG").ok().as_deref() == Some("1") {
-        return None;
+        return Ok(None);
     }
     if let Ok(path) = env::var("RELAY_CONFIG_DIR") {
-        if path.is_empty() {
-            return None;
+        let trimmed = path.trim();
+        if trimmed.is_empty() {
+            return Ok(None);
         }
-        return Some(PathBuf::from(path));
+        let home = resolve_home_dir()?;
+        let os_home = os_home_dir();
+        let xdg_config_home = resolve_xdg_config_home_checked(os_home.as_deref())?;
+        return normalize_path_with_context(trimmed, home.as_deref(), xdg_config_home.as_deref())
+            .map(Some)
+            .map_err(|err| {
+                io::Error::new(
+                    err.kind(),
+                    format!("invalid RELAY_CONFIG_DIR path override `{trimmed}`: {err}"),
+                )
+            });
     }
-    dirs::config_dir()
+    Ok(dirs::config_dir())
+}
+
+fn resolve_xdg_config_home_checked(home: Option<&Path>) -> io::Result<Option<PathBuf>> {
+    let Ok(raw) = env::var("XDG_CONFIG_HOME") else {
+        return Ok(None);
+    };
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    normalize_path_with_context(trimmed, home, None)
+        .map(Some)
+        .map_err(|err| {
+            io::Error::new(
+                err.kind(),
+                format!("invalid XDG_CONFIG_HOME value `{trimmed}`: {err}"),
+            )
+        })
+}
+
+macro_rules! normalize_optional_paths {
+    ($cfg:ident, $($field:ident),+ $(,)?) => {
+        $(
+            $cfg.$field = normalize_optional_config_path(stringify!($field), $cfg.$field)?;
+        )+
+    };
+}
+
+fn normalize_partial_config_paths(mut cfg: PartialConfig) -> io::Result<PartialConfig> {
+    normalize_optional_paths!(
+        cfg,
+        central_dir,
+        central_skills_dir,
+        central_agents_dir,
+        central_rules_dir,
+        claude_dir,
+        claude_skills_dir,
+        cursor_dir,
+        opencode_commands_dir,
+        opencode_dir,
+        opencode_skills_dir,
+        opencode_agents_file,
+        codex_dir,
+        codex_skills_dir,
+        codex_rules_file,
+        codex_agents_file,
+    );
+    Ok(cfg)
+}
+
+fn normalize_optional_config_path(
+    field_name: &str,
+    value: Option<PathBuf>,
+) -> io::Result<Option<PathBuf>> {
+    value
+        .map(|path| {
+            let raw = path.to_str().ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("`{field_name}` contains non-utf8 path data"),
+                )
+            })?;
+            normalize_path_with_current_context(raw).map_err(|err| {
+                io::Error::new(
+                    err.kind(),
+                    format!("invalid `{field_name}` path `{raw}` in config.toml: {err}"),
+                )
+            })
+        })
+        .transpose()
+}
+
+fn normalize_path_with_current_context(raw: &str) -> io::Result<PathBuf> {
+    let home = resolve_home_dir()?;
+    let os_home = os_home_dir();
+    let xdg_config_home = resolve_xdg_config_home_checked(os_home.as_deref())?;
+    normalize_path_with_context(raw, home.as_deref(), xdg_config_home.as_deref())
+}
+
+fn normalize_path_with_context(
+    raw: &str,
+    home: Option<&Path>,
+    xdg_config_home: Option<&Path>,
+) -> io::Result<PathBuf> {
+    let expanded = expand_supported_shell_syntax(raw.trim(), home, xdg_config_home)?;
+    ensure_no_shell_syntax(&expanded)?;
+    Ok(PathBuf::from(expanded))
+}
+
+fn resolve_relay_config_root(home: &Path) -> io::Result<PathBuf> {
+    let os_home = os_home_dir();
+    let xdg_config_home = resolve_xdg_config_home_checked(os_home.as_deref())?;
+    Ok(xdg_config_home
+        .unwrap_or_else(|| home.join(".config"))
+        .join("relay"))
+}
+
+fn expand_supported_shell_syntax(
+    input: &str,
+    home: Option<&Path>,
+    xdg_config_home: Option<&Path>,
+) -> io::Result<String> {
+    let chars: Vec<char> = input.chars().collect();
+    let mut out = String::new();
+    let mut idx = match chars.first() {
+        Some('~') if input == "~" => return home_path_string(home),
+        Some('~') if chars.get(1) == Some(&'/') => {
+            out.push_str(&home_path_string(home)?);
+            1
+        }
+        Some('~') => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("unsupported shell home syntax in path `{input}`"),
+            ))
+        }
+        _ => 0,
+    };
+    while idx < chars.len() {
+        if chars[idx] != '$' {
+            out.push(chars[idx]);
+            idx += 1;
+            continue;
+        }
+        if idx + 1 >= chars.len() {
+            out.push('$');
+            idx += 1;
+            continue;
+        }
+        match chars[idx + 1] {
+            '{' => {
+                let mut end = idx + 2;
+                while end < chars.len() && chars[end] != '}' {
+                    end += 1;
+                }
+                if end >= chars.len() {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("unterminated shell expression in path `{input}`"),
+                    ));
+                }
+                let token: String = chars[idx + 2..end].iter().collect();
+                out.push_str(&expand_shell_token(&token, home, xdg_config_home)?);
+                idx = end + 1;
+            }
+            ch if is_shell_var_start(ch) => {
+                let mut end = idx + 1;
+                while end < chars.len() && is_shell_var_char(chars[end]) {
+                    end += 1;
+                }
+                let token: String = chars[idx + 1..end].iter().collect();
+                out.push_str(&expand_shell_token(&token, home, xdg_config_home)?);
+                idx = end;
+            }
+            _ => {
+                out.push('$');
+                idx += 1;
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn expand_shell_token(
+    token: &str,
+    home: Option<&Path>,
+    xdg_config_home: Option<&Path>,
+) -> io::Result<String> {
+    match token.trim() {
+        "HOME" => home_path_string(home),
+        "XDG_CONFIG_HOME" | "XDG_CONFIG_HOME:-$HOME/.config" => {
+            xdg_config_home_string(home, xdg_config_home)
+        }
+        _ => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "unsupported shell variable `${}` in path; only HOME and XDG_CONFIG_HOME are supported",
+                token.trim()
+            ),
+        )),
+    }
+}
+
+fn home_path_string(home: Option<&Path>) -> io::Result<String> {
+    home.map(|path| path.to_string_lossy().to_string())
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                "could not resolve home directory for path expansion",
+            )
+        })
+}
+
+fn xdg_config_home_string(
+    home: Option<&Path>,
+    xdg_config_home: Option<&Path>,
+) -> io::Result<String> {
+    if let Some(path) = xdg_config_home {
+        return Ok(path.to_string_lossy().to_string());
+    }
+    Ok(PathBuf::from(home_path_string(home)?)
+        .join(".config")
+        .to_string_lossy()
+        .to_string())
+}
+
+fn ensure_no_shell_syntax(expanded: &str) -> io::Result<()> {
+    if looks_like_shell_syntax(expanded) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("unsupported shell syntax remained after expansion in path `{expanded}`"),
+        ));
+    }
+    Ok(())
+}
+
+fn looks_like_shell_syntax(input: &str) -> bool {
+    let chars: Vec<char> = input.chars().collect();
+    for idx in 0..chars.len() {
+        if chars[idx] != '$' || idx + 1 >= chars.len() {
+            continue;
+        }
+        let next = chars[idx + 1];
+        if next == '{' || next == '(' {
+            return true;
+        }
+    }
+    false
+}
+
+fn is_shell_var_start(ch: char) -> bool {
+    ch == '_' || ch.is_ascii_alphabetic()
+}
+
+fn is_shell_var_char(ch: char) -> bool {
+    is_shell_var_start(ch) || ch.is_ascii_digit()
+}
+
+fn os_home_dir() -> Option<PathBuf> {
+    env::var("HOME")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(dirs::home_dir)
 }
 
 #[cfg(test)]
@@ -293,7 +567,19 @@ mod tests {
 
     #[inline(never)]
     fn env_lock() -> std::sync::MutexGuard<'static, ()> {
-        crate::ENV_LOCK.lock().unwrap()
+        let lock = crate::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        set_env("RELAY_HOME", None);
+        set_env("RELAY_NO_HOME", None);
+        set_env("RELAY_CONFIG_DIR", None);
+        set_env("RELAY_NO_CONFIG", None);
+        set_env("CODEX_HOME", None);
+        set_env("CLAUDE_HOME", None);
+        set_env("OPENCODE_HOME", None);
+        set_env("CURSOR_HOME", None);
+        set_env("XDG_CONFIG_HOME", None);
+        lock
     }
 
     #[test]
@@ -334,6 +620,61 @@ mod tests {
     }
 
     #[test]
+    fn default_paths_expands_shell_style_tool_paths() -> io::Result<()> {
+        let _lock = env_lock();
+        let tmp = TempDir::new()?;
+        let home = tmp.path().join("home");
+        let xdg = tmp.path().join("xdg");
+        fs::create_dir_all(&home)?;
+        fs::create_dir_all(&xdg)?;
+        set_env("RELAY_HOME", Some(home.to_string_lossy().as_ref()));
+        set_env("XDG_CONFIG_HOME", Some(xdg.to_string_lossy().as_ref()));
+        set_env(
+            "CODEX_HOME",
+            Some("${XDG_CONFIG_HOME:-$HOME/.config}/codex"),
+        );
+        set_env("CLAUDE_HOME", Some("$HOME/.claude"));
+
+        let cfg = Config::default_paths()?;
+        assert_eq!(cfg.central_dir, xdg.join("relay/commands"));
+        assert_eq!(cfg.central_skills_dir, xdg.join("relay/skills"));
+        assert_eq!(cfg.central_agents_dir, xdg.join("relay/agents"));
+        assert_eq!(cfg.central_rules_dir, xdg.join("relay/rules"));
+        assert_eq!(cfg.codex_dir, xdg.join("codex/prompts"));
+        assert_eq!(cfg.claude_dir, home.join(".claude/commands"));
+
+        set_env("RELAY_HOME", None);
+        set_env("XDG_CONFIG_HOME", None);
+        set_env("CODEX_HOME", None);
+        set_env("CLAUDE_HOME", None);
+        Ok(())
+    }
+
+    #[test]
+    fn default_paths_expands_xdg_config_home_with_os_home() -> io::Result<()> {
+        let _lock = env_lock();
+        let tmp = TempDir::new()?;
+        let relay_home = tmp.path().join("relay-home");
+        let os_home = tmp.path().join("os-home");
+        fs::create_dir_all(&relay_home)?;
+        fs::create_dir_all(os_home.join(".xdg"))?;
+        let original_home = env::var("HOME").ok();
+        set_env("HOME", Some(os_home.to_string_lossy().as_ref()));
+        set_env("RELAY_HOME", Some(relay_home.to_string_lossy().as_ref()));
+        set_env("XDG_CONFIG_HOME", Some("$HOME/.xdg"));
+        set_env("CODEX_HOME", Some("${XDG_CONFIG_HOME}/codex"));
+
+        let cfg = Config::default_paths()?;
+        assert_eq!(cfg.codex_dir, os_home.join(".xdg/codex/prompts"));
+
+        set_env("RELAY_HOME", None);
+        set_env("XDG_CONFIG_HOME", None);
+        set_env("CODEX_HOME", None);
+        set_env("HOME", original_home.as_deref());
+        Ok(())
+    }
+
+    #[test]
     fn config_path_uses_home_or_config_dir() -> io::Result<()> {
         let _lock = env_lock();
         let tmp = TempDir::new()?;
@@ -354,6 +695,50 @@ mod tests {
 
         set_env("RELAY_CONFIG_DIR", None);
         set_env("RELAY_NO_HOME", None);
+        Ok(())
+    }
+
+    #[test]
+    fn config_path_prefers_xdg_config_home() -> io::Result<()> {
+        let _lock = env_lock();
+        let tmp = TempDir::new()?;
+        let home = tmp.path().join("home");
+        let xdg = tmp.path().join("xdg");
+        fs::create_dir_all(&home)?;
+        fs::create_dir_all(&xdg)?;
+        set_env("RELAY_HOME", Some(home.to_string_lossy().as_ref()));
+        set_env("XDG_CONFIG_HOME", Some(xdg.to_string_lossy().as_ref()));
+
+        let config_path = Config::config_path()?;
+        assert_eq!(config_path, xdg.join("relay/config.toml"));
+
+        set_env("RELAY_HOME", None);
+        set_env("XDG_CONFIG_HOME", None);
+        Ok(())
+    }
+
+    #[test]
+    fn config_path_expands_xdg_config_home_with_os_home() -> io::Result<()> {
+        let _lock = env_lock();
+        let tmp = TempDir::new()?;
+        let os_home = tmp.path().join("os-home");
+        fs::create_dir_all(os_home.join(".xdg"))?;
+        let original_home = env::var("HOME").ok();
+        set_env("HOME", Some(os_home.to_string_lossy().as_ref()));
+        set_env("RELAY_NO_HOME", Some("1"));
+        set_env("RELAY_CONFIG_DIR", Some("${XDG_CONFIG_HOME}/relay-config"));
+        set_env("XDG_CONFIG_HOME", Some("$HOME/.xdg"));
+
+        let config_path = Config::config_path()?;
+        assert_eq!(
+            config_path,
+            os_home.join(".xdg/relay-config/relay/config.toml")
+        );
+
+        set_env("RELAY_NO_HOME", None);
+        set_env("RELAY_CONFIG_DIR", None);
+        set_env("XDG_CONFIG_HOME", None);
+        set_env("HOME", original_home.as_deref());
         Ok(())
     }
 
@@ -386,6 +771,7 @@ mod tests {
         set_env("RELAY_HOME", Some(home.to_string_lossy().as_ref()));
 
         let config_path = Config::config_path()?;
+        fs::create_dir_all(config_path.parent().expect("config path has parent"))?;
         let config_body = r#"
 enabled_tools = ["Codex", "Claude"]
 central_dir = "/tmp/relay/commands"
@@ -406,6 +792,107 @@ opencode_dir = "/legacy/opencode/command"
     }
 
     #[test]
+    fn load_or_default_expands_xdg_expression_paths() -> io::Result<()> {
+        let _lock = env_lock();
+        let tmp = TempDir::new()?;
+        let home = tmp.path().join("home");
+        let xdg = tmp.path().join("xdg");
+        fs::create_dir_all(home.join(".config/relay"))?;
+        fs::create_dir_all(&xdg)?;
+        set_env("RELAY_HOME", Some(home.to_string_lossy().as_ref()));
+        set_env("XDG_CONFIG_HOME", Some(xdg.to_string_lossy().as_ref()));
+
+        let config_path = Config::config_path()?;
+        fs::create_dir_all(config_path.parent().expect("config path has parent"))?;
+        let config_body = r#"
+central_dir = "${XDG_CONFIG_HOME:-$HOME/.config}/relay/commands"
+"#;
+        fs::write(&config_path, config_body)?;
+
+        let cfg = Config::load_or_default()?;
+        assert_eq!(cfg.central_dir, xdg.join("relay/commands"));
+
+        set_env("RELAY_HOME", None);
+        set_env("XDG_CONFIG_HOME", None);
+        Ok(())
+    }
+
+    #[test]
+    fn load_or_default_expands_xdg_config_home_with_os_home() -> io::Result<()> {
+        let _lock = env_lock();
+        let tmp = TempDir::new()?;
+        let relay_home = tmp.path().join("relay-home");
+        let os_home = tmp.path().join("os-home");
+        fs::create_dir_all(relay_home.join(".config/relay"))?;
+        fs::create_dir_all(os_home.join(".xdg"))?;
+        let original_home = env::var("HOME").ok();
+        set_env("HOME", Some(os_home.to_string_lossy().as_ref()));
+        set_env("RELAY_HOME", Some(relay_home.to_string_lossy().as_ref()));
+        set_env("XDG_CONFIG_HOME", Some("$HOME/.xdg"));
+
+        let config_path = Config::config_path()?;
+        fs::create_dir_all(config_path.parent().expect("config path has parent"))?;
+        let config_body = r#"
+central_dir = "${XDG_CONFIG_HOME}/relay/commands"
+"#;
+        fs::write(&config_path, config_body)?;
+
+        let cfg = Config::load_or_default()?;
+        assert_eq!(cfg.central_dir, os_home.join(".xdg/relay/commands"));
+
+        set_env("RELAY_HOME", None);
+        set_env("XDG_CONFIG_HOME", None);
+        set_env("HOME", original_home.as_deref());
+        Ok(())
+    }
+
+    #[test]
+    fn load_or_default_uses_home_config_fallback_when_xdg_missing() -> io::Result<()> {
+        let _lock = env_lock();
+        let tmp = TempDir::new()?;
+        let home = tmp.path().join("home");
+        fs::create_dir_all(home.join(".config/relay"))?;
+        set_env("RELAY_HOME", Some(home.to_string_lossy().as_ref()));
+        set_env("XDG_CONFIG_HOME", None);
+
+        let config_path = Config::config_path()?;
+        fs::create_dir_all(config_path.parent().expect("config path has parent"))?;
+        let config_body = r#"
+central_dir = "${XDG_CONFIG_HOME:-$HOME/.config}/relay/commands"
+"#;
+        fs::write(&config_path, config_body)?;
+
+        let cfg = Config::load_or_default()?;
+        assert_eq!(cfg.central_dir, home.join(".config/relay/commands"));
+
+        set_env("RELAY_HOME", None);
+        Ok(())
+    }
+
+    #[test]
+    fn load_or_default_errors_on_unsupported_shell_variable() -> io::Result<()> {
+        let _lock = env_lock();
+        let tmp = TempDir::new()?;
+        let home = tmp.path().join("home");
+        fs::create_dir_all(home.join(".config/relay"))?;
+        set_env("RELAY_HOME", Some(home.to_string_lossy().as_ref()));
+
+        let config_path = Config::config_path()?;
+        fs::create_dir_all(config_path.parent().expect("config path has parent"))?;
+        let config_body = r#"
+central_dir = "${UNSUPPORTED_VAR}/relay/commands"
+"#;
+        fs::write(&config_path, config_body)?;
+
+        let err = Config::load_or_default().unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("unsupported shell variable"));
+
+        set_env("RELAY_HOME", None);
+        Ok(())
+    }
+
+    #[test]
     fn load_or_default_errors_on_invalid_toml() -> io::Result<()> {
         let _lock = env_lock();
         let tmp = TempDir::new()?;
@@ -413,6 +900,7 @@ opencode_dir = "/legacy/opencode/command"
         fs::create_dir_all(home.join(".config/relay"))?;
         set_env("RELAY_HOME", Some(home.to_string_lossy().as_ref()));
         let config_path = Config::config_path()?;
+        fs::create_dir_all(config_path.parent().expect("config path has parent"))?;
         fs::write(&config_path, "enabled_tools = [")?;
         let err = Config::load_or_default().unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::InvalidData);
@@ -430,6 +918,40 @@ opencode_dir = "/legacy/opencode/command"
         let expanded = expand_tilde("~/test")?;
         assert_eq!(expanded, home.join("test"));
         set_env("RELAY_HOME", None);
+        Ok(())
+    }
+
+    #[test]
+    fn expand_tilde_allows_dollar_in_os_home() -> io::Result<()> {
+        let _lock = env_lock();
+        let tmp = TempDir::new()?;
+        let os_home = tmp.path().join("home$ops");
+        fs::create_dir_all(&os_home)?;
+        let original_home = env::var("HOME").ok();
+        set_env("RELAY_HOME", None);
+        set_env("HOME", Some(os_home.to_string_lossy().as_ref()));
+
+        let expanded = expand_tilde("~/test")?;
+        assert_eq!(expanded, os_home.join("test"));
+
+        set_env("HOME", original_home.as_deref());
+        Ok(())
+    }
+
+    #[test]
+    fn home_expansion_allows_dollar_in_os_home() -> io::Result<()> {
+        let _lock = env_lock();
+        let tmp = TempDir::new()?;
+        let os_home = tmp.path().join("home$ops");
+        fs::create_dir_all(&os_home)?;
+        let original_home = env::var("HOME").ok();
+        set_env("RELAY_HOME", None);
+        set_env("HOME", Some(os_home.to_string_lossy().as_ref()));
+
+        let expanded = normalize_path_with_current_context("$HOME/test")?;
+        assert_eq!(expanded, os_home.join("test"));
+
+        set_env("HOME", original_home.as_deref());
         Ok(())
     }
 
@@ -559,6 +1081,7 @@ opencode_dir = "/legacy/opencode/command"
         set_env("RELAY_HOME", Some(home.to_string_lossy().as_ref()));
 
         let config_path = Config::config_path()?;
+        fs::create_dir_all(config_path.parent().expect("config path has parent"))?;
         let config_body = r#"
 opencode_dir = "/tmp/opencode/other"
 "#;
@@ -607,12 +1130,42 @@ opencode_dir = "/tmp/opencode/other"
     }
 
     #[test]
-    fn resolve_home_dir_falls_back_to_dirs() {
+    fn resolve_home_dir_falls_back_to_dirs() -> io::Result<()> {
         let _lock = env_lock();
         set_env("RELAY_HOME", None);
         set_env("RELAY_NO_HOME", None);
-        let resolved = resolve_home_dir();
+        let resolved = resolve_home_dir()?;
         assert_eq!(resolved, dirs::home_dir());
+        Ok(())
+    }
+
+    #[test]
+    fn resolve_home_dir_returns_invalid_config_error() {
+        let _lock = env_lock();
+        set_env("RELAY_HOME", Some("${UNSUPPORTED_VAR}/relay"));
+        let err = resolve_home_dir().unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("invalid RELAY_HOME path override"));
+        assert!(err.to_string().contains("unsupported shell variable"));
+        set_env("RELAY_HOME", None);
+    }
+
+    #[test]
+    fn resolve_home_dir_expands_relay_home_with_xdg_config_home() -> io::Result<()> {
+        let _lock = env_lock();
+        let tmp = TempDir::new()?;
+        let xdg = tmp.path().join("xdg");
+        fs::create_dir_all(&xdg)?;
+        set_env("XDG_CONFIG_HOME", Some(xdg.to_string_lossy().as_ref()));
+        set_env("RELAY_HOME", Some("${XDG_CONFIG_HOME}/relay"));
+
+        let resolved = resolve_home_dir()?
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "home should resolve"))?;
+        assert_eq!(resolved, xdg.join("relay"));
+
+        set_env("RELAY_HOME", None);
+        set_env("XDG_CONFIG_HOME", None);
+        Ok(())
     }
 
     #[test]

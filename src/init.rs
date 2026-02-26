@@ -233,7 +233,7 @@ fn ensure_parent_if_exists(path: &Path) -> io::Result<()> {
 }
 
 fn maybe_setup_dotfiles_backup(cfg: &Config) -> io::Result<()> {
-    let home = resolve_home_dir().ok_or_else(|| {
+    let home = resolve_home_dir()?.ok_or_else(|| {
         io::Error::new(io::ErrorKind::NotFound, "could not resolve home directory")
     })?;
     let dotfiles_root = home.join(".dotfiles");
