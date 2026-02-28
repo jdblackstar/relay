@@ -206,6 +206,11 @@ impl Config {
             .get(&tool.to_ascii_lowercase())
             .map(String::as_str)
     }
+
+    /// Returns `true` when a config file has been written by `relay init`.
+    pub fn is_initialized() -> io::Result<bool> {
+        Ok(Self::config_path()?.exists())
+    }
 }
 
 fn normalize_tools(mut tools: Vec<String>) -> Vec<String> {
@@ -1092,6 +1097,37 @@ opencode_dir = "/tmp/opencode/other"
             cfg.opencode_commands_dir,
             PathBuf::from("/tmp/opencode/other")
         );
+
+        set_env("RELAY_HOME", None);
+        Ok(())
+    }
+
+    #[test]
+    fn is_initialized_false_when_no_config_file() -> io::Result<()> {
+        let _lock = env_lock();
+        let tmp = TempDir::new()?;
+        let home = tmp.path().join("home");
+        fs::create_dir_all(&home)?;
+        set_env("RELAY_HOME", Some(home.to_string_lossy().as_ref()));
+
+        assert!(!Config::is_initialized()?);
+
+        set_env("RELAY_HOME", None);
+        Ok(())
+    }
+
+    #[test]
+    fn is_initialized_true_after_save() -> io::Result<()> {
+        let _lock = env_lock();
+        let tmp = TempDir::new()?;
+        let home = tmp.path().join("home");
+        fs::create_dir_all(&home)?;
+        set_env("RELAY_HOME", Some(home.to_string_lossy().as_ref()));
+
+        let cfg = Config::default_paths()?;
+        let config_path = Config::config_path()?;
+        cfg.save(&config_path)?;
+        assert!(Config::is_initialized()?);
 
         set_env("RELAY_HOME", None);
         Ok(())
