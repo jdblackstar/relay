@@ -206,6 +206,27 @@ impl Config {
             .get(&tool.to_ascii_lowercase())
             .map(String::as_str)
     }
+
+    /// Returns `true` when a config file exists at the primary or legacy path.
+    ///
+    /// Mirrors the same fallback logic as [`load_or_default`]: when `RELAY_HOME`
+    /// is not explicitly set, the legacy config path is also checked.
+    pub fn is_initialized() -> io::Result<bool> {
+        if Self::config_path()?.exists() {
+            return Ok(true);
+        }
+        let relay_home_explicit = env::var("RELAY_HOME")
+            .ok()
+            .map(|value| !value.is_empty())
+            .unwrap_or(false);
+        if relay_home_explicit {
+            return Ok(false);
+        }
+        match Self::legacy_config_path() {
+            Ok(legacy) => Ok(legacy.exists()),
+            Err(_) => Ok(false),
+        }
+    }
 }
 
 fn normalize_tools(mut tools: Vec<String>) -> Vec<String> {
@@ -1094,6 +1115,82 @@ opencode_dir = "/tmp/opencode/other"
         );
 
         set_env("RELAY_HOME", None);
+        Ok(())
+    }
+
+    #[test]
+    fn is_initialized_false_when_no_config_file() -> io::Result<()> {
+        let _lock = env_lock();
+        let tmp = TempDir::new()?;
+        let home = tmp.path().join("home");
+        fs::create_dir_all(&home)?;
+        set_env("RELAY_HOME", Some(home.to_string_lossy().as_ref()));
+
+        assert!(!Config::is_initialized()?);
+
+        set_env("RELAY_HOME", None);
+        Ok(())
+    }
+
+    #[test]
+    fn is_initialized_true_after_save() -> io::Result<()> {
+        let _lock = env_lock();
+        let tmp = TempDir::new()?;
+        let home = tmp.path().join("home");
+        fs::create_dir_all(&home)?;
+        set_env("RELAY_HOME", Some(home.to_string_lossy().as_ref()));
+
+        let cfg = Config::default_paths()?;
+        let config_path = Config::config_path()?;
+        cfg.save(&config_path)?;
+        assert!(Config::is_initialized()?);
+
+        set_env("RELAY_HOME", None);
+        Ok(())
+    }
+
+    #[test]
+    fn is_initialized_true_with_legacy_config() -> io::Result<()> {
+        let _lock = env_lock();
+        let tmp = TempDir::new()?;
+        let home = tmp.path().join("home");
+        let legacy = tmp.path().join("legacy");
+        fs::create_dir_all(&home)?;
+        fs::create_dir_all(legacy.join("relay"))?;
+        set_env("RELAY_HOME", Some(home.to_string_lossy().as_ref()));
+        set_env("RELAY_CONFIG_DIR", Some(legacy.to_string_lossy().as_ref()));
+
+        // Primary path does not exist; legacy does.
+        let legacy_path = legacy.join("relay/config.toml");
+        fs::write(&legacy_path, "enabled_tools = [\"claude\"]")?;
+
+        // Clear RELAY_HOME so the legacy fallback is reached.
+        set_env("RELAY_HOME", None);
+        assert!(Config::is_initialized()?);
+
+        set_env("RELAY_CONFIG_DIR", None);
+        Ok(())
+    }
+
+    #[test]
+    fn is_initialized_ignores_legacy_when_relay_home_explicit() -> io::Result<()> {
+        let _lock = env_lock();
+        let tmp = TempDir::new()?;
+        let home = tmp.path().join("home");
+        let legacy = tmp.path().join("legacy");
+        fs::create_dir_all(&home)?;
+        fs::create_dir_all(legacy.join("relay"))?;
+        set_env("RELAY_HOME", Some(home.to_string_lossy().as_ref()));
+        set_env("RELAY_CONFIG_DIR", Some(legacy.to_string_lossy().as_ref()));
+
+        let legacy_path = legacy.join("relay/config.toml");
+        fs::write(&legacy_path, "enabled_tools = [\"claude\"]")?;
+
+        // RELAY_HOME is explicit, so legacy path should be ignored.
+        assert!(!Config::is_initialized()?);
+
+        set_env("RELAY_HOME", None);
+        set_env("RELAY_CONFIG_DIR", None);
         Ok(())
     }
 

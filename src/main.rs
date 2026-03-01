@@ -128,6 +128,18 @@ fn main() {
 }
 
 #[cfg(all(not(any(test, coverage)), not(windows)))]
+fn warn_if_not_initialized() {
+    match config::Config::is_initialized() {
+        Ok(true) => {}
+        Ok(false) => {
+            eprintln!("hint: relay has not been set up yet; run `relay init` first");
+            eprintln!();
+        }
+        Err(_) => {}
+    }
+}
+
+#[cfg(all(not(any(test, coverage)), not(windows)))]
 fn main() -> std::io::Result<()> {
     let Cli {
         debug,
@@ -148,6 +160,7 @@ fn main() -> std::io::Result<()> {
             plan,
             apply: _apply,
         } => {
+            warn_if_not_initialized();
             let cfg = config::Config::load_or_default()?;
             let mismatch = versions::check_versions(&cfg);
             if confirm_versions && mismatch && !versions::confirm_version_mismatch()? {
@@ -193,6 +206,7 @@ fn main() -> std::io::Result<()> {
             daemon,
             confirm_versions,
         } => {
+            warn_if_not_initialized();
             logging::debug(&format!(
                 "command=watch debounce_ms={debounce_ms} quiet={quiet} daemon={daemon} confirm_versions={confirm_versions}"
             ));
@@ -227,11 +241,13 @@ fn main() -> std::io::Result<()> {
             watch::watch(&cfg, debounce_ms, log_mode)
         }
         Commands::Status => {
+            warn_if_not_initialized();
             logging::debug("command=status");
             let cfg = config::Config::load_or_default()?;
             print_service_status(&cfg)
         }
         Commands::Daemon { command } => {
+            warn_if_not_initialized();
             let cfg = config::Config::load_or_default()?;
             match command {
                 DaemonCommand::Install {
@@ -282,6 +298,7 @@ fn main() -> std::io::Result<()> {
             }
         }
         Commands::History { limit } => {
+            warn_if_not_initialized();
             logging::debug(&format!("command=history limit={limit}"));
             let cfg = config::Config::load_or_default()?;
             let store = history::HistoryStore::from_config(&cfg)?;
@@ -303,6 +320,7 @@ fn main() -> std::io::Result<()> {
             latest,
             force,
         } => {
+            warn_if_not_initialized();
             logging::debug(&format!(
                 "command=rollback latest={latest} force={force} event_id={}",
                 event_id.as_deref().unwrap_or("none")
