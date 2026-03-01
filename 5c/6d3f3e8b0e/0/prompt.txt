@@ -1,0 +1,9 @@
+hey, can you check my git history and undo the recent "checkpoint" commit? it's kind of fucking up a lot of PRs
+
+---
+
+will it revert from all branches?
+
+---
+
+yeah, please

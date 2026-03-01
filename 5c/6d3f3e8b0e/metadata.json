@@ -1,0 +1,29 @@
+{
+  "cli_version": "0.4.8",
+  "checkpoint_id": "5c6d3f3e8b0e",
+  "strategy": "manual-commit",
+  "branch": "feat/adding-entire-support",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "CONTRIBUTING.md",
+    "PROVIDERS.md",
+    "README.md",
+    "SECURITY.md"
+  ],
+  "sessions": [
+    {
+      "metadata": "/5c/6d3f3e8b0e/0/metadata.json",
+      "transcript": "/5c/6d3f3e8b0e/0/full.jsonl",
+      "context": "/5c/6d3f3e8b0e/0/context.md",
+      "content_hash": "/5c/6d3f3e8b0e/0/content_hash.txt",
+      "prompt": "/5c/6d3f3e8b0e/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 11,
+    "cache_creation_tokens": 13363,
+    "cache_read_tokens": 91558,
+    "output_tokens": 717,
+    "api_call_count": 5
+  }
+}
