@@ -241,6 +241,7 @@ fn main() -> std::io::Result<()> {
             watch::watch(&cfg, debounce_ms, log_mode)
         }
         Commands::Status => {
+            warn_if_not_initialized();
             logging::debug("command=status");
             let cfg = config::Config::load_or_default()?;
             print_service_status(&cfg)
