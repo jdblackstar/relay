@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- feat: auto-update changelog on merge to main and release (#6)
 - Changelog automation: entries are added when PRs are merged to main.
 - Agent-polished release notes (opt-in) for release cuts.
 
