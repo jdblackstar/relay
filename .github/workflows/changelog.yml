@@ -1,0 +1,149 @@
+# Append a changelog entry when a PR lands on main.
+# Handles merge commits ("Merge pull request #N ...") and squash-merges ("title (#N)").
+# Skips bot commits (e.g. this workflow's own "chore:" push) to avoid loops.
+
+name: changelog
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  update:
+    name: update changelog
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Detect PR and extract metadata
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          SUBJECT=$(git log -1 --format=%s)
+
+          # Skip bot commits (our own changelog pushes)
+          AUTHOR=$(git log -1 --format=%an)
+          if [ "$AUTHOR" = "github-actions[bot]" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Merge commit: "Merge pull request #123 from ..."
+          PR=$(echo "$SUBJECT" | sed -n 's/^Merge pull request #\([0-9]*\).*/\1/p')
+
+          # Squash-merge: "Some title (#123)"
+          if [ -z "$PR" ]; then
+            PR=$(echo "$SUBJECT" | sed -n 's/.*(\#\([0-9]*\))$/\1/p')
+          fi
+
+          if [ -z "$PR" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "number=$PR" >> "$GITHUB_OUTPUT"
+
+          TITLE=$(gh pr view "$PR" --json title -q .title 2>/dev/null || echo "$SUBJECT")
+          echo "title<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$TITLE" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+          # Grab labels for categorization
+          LABELS=$(gh pr view "$PR" --json labels -q '[.labels[].name] | join(",")' 2>/dev/null || true)
+          echo "labels=$LABELS" >> "$GITHUB_OUTPUT"
+
+      - name: Insert changelog entry
+        if: steps.pr.outputs.skip != 'true'
+        env:
+          PR_TITLE: ${{ steps.pr.outputs.title }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          PR_LABELS: ${{ steps.pr.outputs.labels }}
+        run: |
+          python3 <<'PY'
+          import os
+          import re
+
+          title = os.environ["PR_TITLE"].strip()
+          number = os.environ["PR_NUMBER"].strip()
+          labels = [l.strip().lower() for l in os.environ.get("PR_LABELS", "").split(",") if l.strip()]
+
+          if not title:
+              raise SystemExit("empty PR title")
+
+          # Pick section based on PR labels
+          label_map = {
+              "bug": "Fixed",
+              "fix": "Fixed",
+              "bugfix": "Fixed",
+              "enhancement": "Changed",
+              "refactor": "Changed",
+              "breaking": "Changed",
+              "deprecation": "Deprecated",
+              "deprecated": "Deprecated",
+              "removal": "Removed",
+              "removed": "Removed",
+              "security": "Security",
+          }
+
+          section = "Added"
+          for label in labels:
+              if label in label_map:
+                  section = label_map[label]
+                  break
+
+          entry = f"- {title} (#{number})"
+
+          path = "CHANGELOG.md"
+          with open(path) as f:
+              content = f.read()
+
+          # Look for existing ### <section> under [Unreleased]
+          unreleased_m = re.search(r"## \[Unreleased\]\n", content)
+          if not unreleased_m:
+              raise SystemExit("CHANGELOG.md: no [Unreleased] heading found")
+
+          # Find the next ## heading (the previous release) to bound our search
+          next_release = re.search(r"\n## \[(?!Unreleased)", content[unreleased_m.end():])
+          if next_release:
+              unreleased_end = unreleased_m.end() + next_release.start()
+          else:
+              unreleased_end = len(content)
+
+          unreleased_block = content[unreleased_m.end():unreleased_end]
+
+          # Try to find the target ### section
+          section_pat = re.compile(rf"(### {re.escape(section)}\n\n)(.*?)(?=\n### |\Z)", re.DOTALL)
+          section_m = section_pat.search(unreleased_block)
+
+          if section_m:
+              # Insert entry at the top of the existing section's content
+              abs_pos = unreleased_m.end() + section_m.start(2)
+              content = content[:abs_pos] + entry + "\n" + content[abs_pos:]
+          else:
+              # Section doesn't exist yet — add it right after ## [Unreleased]\n
+              insert_pos = unreleased_m.end()
+              content = content[:insert_pos] + f"\n### {section}\n\n{entry}\n" + content[insert_pos:]
+
+          with open(path, "w") as f:
+              f.write(content)
+          PY
+
+      - name: Commit and push
+        if: steps.pr.outputs.skip != 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+          if git diff --staged --quiet; then
+            echo "No changelog changes (entry may already exist)"
+            exit 0
+          fi
+          git commit -m "chore: changelog for #${{ steps.pr.outputs.number }}"
+          git push

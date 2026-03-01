@@ -115,6 +115,58 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Extract raw changelog
+        id: raw
+        run: |
+          python3 <<'PY'
+          import os, re
+
+          path = "CHANGELOG.md"
+          out = os.environ["GITHUB_OUTPUT"]
+
+          if not os.path.exists(path):
+              with open(out, "a") as f:
+                  f.write("body<<RELEASE_NOTES\nSee CHANGELOG.md for details.\nRELEASE_NOTES\n")
+              raise SystemExit(0)
+
+          with open(path) as f:
+              content = f.read()
+
+          m = re.search(r"## \[Unreleased\](.*?)(?=\n## \[|\Z)", content, re.DOTALL)
+          body = m.group(1).strip() if m else "See CHANGELOG.md for details."
+
+          with open(out, "a") as f:
+              f.write("body<<RELEASE_NOTES\n")
+              f.write(body)
+              f.write("\nRELEASE_NOTES\n")
+          PY
+
+      # --- Agent-polished release notes (opt-in) ---
+      # To enable: uncomment the two steps below, add ANTHROPIC_API_KEY to repo
+      # secrets, and change the Publish step to use steps.polished.outputs.body
+      # instead of steps.raw.outputs.body.
+      #
+      # - name: Install agent CLI
+      #   run: npm install -g @anthropic-ai/claude-code
+      #
+      # - name: Polish release notes
+      #   id: polished
+      #   env:
+      #     ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      #   run: |
+      #     POLISHED=$(claude -p --model sonnet \
+      #       "Rewrite these changelog bullets into concise, user-facing release notes in markdown. Keep ### section headings (Added, Changed, Fixed, etc). Do not invent changes. Output only the markdown, no preamble." \
+      #       <<< "${{ steps.raw.outputs.body }}")
+      #     {
+      #       echo "body<<RELEASE_NOTES"
+      #       echo "$POLISHED"
+      #       echo "RELEASE_NOTES"
+      #     } >> "$GITHUB_OUTPUT"
+
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -122,4 +174,82 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
+          body: ${{ steps.raw.outputs.body }}
           files: dist/**/relay_*.tar.gz*
+
+  changelog-cut:
+    name: cut changelog for release
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Cut [Unreleased] to version and push
+        run: |
+          export TAG="${{ github.ref_name }}"
+          export VERSION="${TAG#v}"
+          export DATE=$(date -u +%Y-%m-%d)
+          git fetch --tags
+          PREV=$(git tag -l 'v*' --sort=-v:refname | sed -n '2p')
+          export PREV=${PREV:-HEAD}
+
+          python3 <<'PY'
+          import os
+          import re
+
+          tag = os.environ["TAG"]
+          version = os.environ["VERSION"]
+          date = os.environ["DATE"]
+          prev = os.environ["PREV"]
+
+          path = "CHANGELOG.md"
+          with open(path) as f:
+              content = f.read()
+
+          # Match [Unreleased] block up to next ## [
+          unreleased_block = re.search(
+              r"(## \[Unreleased\]\n\n)(.*?)(?=\n## \[|\Z)",
+              content,
+              re.DOTALL,
+          )
+          if not unreleased_block:
+              raise SystemExit("CHANGELOG: no [Unreleased] block found")
+
+          inner = unreleased_block.group(2)  # ### Added\n\n- ...
+          new_section = f"## [{version}] - {date}\n\n{inner}\n\n## [Unreleased]\n\n### Added\n\n\n"
+          content = content.replace(unreleased_block.group(0), new_section, 1)
+
+          # Update [Unreleased] link
+          content = re.sub(
+              r"\[Unreleased\]: \S+",
+              f"[Unreleased]: https://github.com/jdblackstar/relay/compare/{tag}...HEAD",
+              content,
+              count=1,
+          )
+
+          # Add new version link (before [Unreleased] link)
+          content = re.sub(
+              r"(\[Unreleased\]: https://[^\n]+\n)",
+              f"[{version}]: https://github.com/jdblackstar/relay/compare/{prev}...{tag}\n\\1",
+              content,
+              count=1,
+          )
+
+          with open(path, "w") as f:
+              f.write(content)
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+          if git diff --staged --quiet; then
+            echo "No changelog changes"
+            exit 0
+          fi
+          git commit -m "chore: cut changelog for ${TAG}"
+          git push origin main
