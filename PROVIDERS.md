@@ -3,6 +3,9 @@
 This is a living reference of how each tool exposes rules, commands, skills, and AGENTS.md.
 Keep this up to date as tooling changes.
 
+Each entry shows whether relay syncs that ability (`true`/`false`), followed by
+the path layout.
+
 ## Rules (auto-loaded at conversation start)
 
 - Codex: `true`. `$CODEX_HOME/rules/default.rules` (default `~/.codex/rules/default.rules`). Not Markdown; uses Starlark.
@@ -35,6 +38,6 @@ Keep this up to date as tooling changes.
 ## Adding a provider (relay checklist)
 
 1. Add default paths + env override in `src/config.rs`.
-2. Add the provider to `TOOL_SPECS` and `tool_paths` in `src/main.rs` (init + detection + notes).
+2. Add a new entry in `TOOL_DEFINITIONS` in `src/tools.rs`.
 3. Wire sync behavior in `src/sync.rs` and watch paths in `src/watch.rs`.
 4. Update README defaults and this document.
