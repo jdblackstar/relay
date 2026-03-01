@@ -223,7 +223,7 @@ jobs:
               raise SystemExit("CHANGELOG: no [Unreleased] block found")
 
           inner = unreleased_block.group(2)  # ### Added\n\n- ...
-          new_section = f"## [{version}] - {date}\n\n{inner}\n\n## [Unreleased]\n\n### Added\n\n\n"
+          new_section = f"## [Unreleased]\n\n### Added\n\n\n## [{version}] - {date}\n\n{inner}\n"
           content = content.replace(unreleased_block.group(0), new_section, 1)
 
           # Update [Unreleased] link
