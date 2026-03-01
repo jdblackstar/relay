@@ -4,7 +4,9 @@ If you find a security issue in relay, please do not open a public issue first.
 
 ## Reporting
 
-Email the maintainer with:
+Email the maintainer at **josh@jdblackstar.com**, or use
+[GitHub private vulnerability reporting](https://github.com/jdblackstar/relay/security/advisories/new)
+if you prefer. Include:
 
 - reproduction details,
 - affected version,
