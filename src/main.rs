@@ -1,3 +1,4 @@
+mod blacklist;
 mod config;
 mod daemon;
 mod history;
