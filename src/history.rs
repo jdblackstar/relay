@@ -568,6 +568,7 @@ mod tests {
         Config {
             enabled_tools: vec!["codex".to_string()],
             verified_versions: std::collections::HashMap::new(),
+            blacklist: std::collections::HashMap::new(),
             central_dir: tmp.path().join("relay/commands"),
             central_skills_dir: tmp.path().join("relay/skills"),
             central_agents_dir: tmp.path().join("relay/agents"),

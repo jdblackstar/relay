@@ -1,3 +1,4 @@
+mod blacklist;
 mod config;
 mod daemon;
 mod history;
@@ -94,6 +95,40 @@ enum Commands {
         /// Skip hash safety checks
         #[arg(short = 'f', long)]
         force: bool,
+    },
+    /// Exclude an item from syncing to specific tools
+    Blacklist {
+        /// Path relative to central store (e.g. commands/review.md, skills/plan)
+        path: String,
+        /// Exclude from Claude
+        #[arg(long)]
+        claude: bool,
+        /// Exclude from Codex
+        #[arg(long)]
+        codex: bool,
+        /// Exclude from Cursor
+        #[arg(long)]
+        cursor: bool,
+        /// Exclude from OpenCode
+        #[arg(long)]
+        opencode: bool,
+    },
+    /// Re-allow a previously blacklisted item for specific tools
+    Allow {
+        /// Path relative to central store (e.g. commands/review.md, skills/plan)
+        path: String,
+        /// Allow for Claude
+        #[arg(long)]
+        claude: bool,
+        /// Allow for Codex
+        #[arg(long)]
+        codex: bool,
+        /// Allow for Cursor
+        #[arg(long)]
+        cursor: bool,
+        /// Allow for OpenCode
+        #[arg(long)]
+        opencode: bool,
     },
 }
 
@@ -313,6 +348,52 @@ fn main() -> std::io::Result<()> {
                     event.id, event.timestamp_ms, event.origin, event.writes
                 );
             }
+            Ok(())
+        }
+        Commands::Blacklist {
+            path,
+            claude,
+            codex,
+            cursor,
+            opencode,
+        } => {
+            warn_if_not_initialized();
+            let tools = blacklist::collect_tool_flags(claude, codex, cursor, opencode);
+            if tools.is_empty() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "at least one tool flag is required (--claude, --codex, --cursor, --opencode)",
+                ));
+            }
+            logging::debug(&format!(
+                "command=blacklist path={path} tools={tools:?}"
+            ));
+            let mut cfg = config::Config::load_or_default()?;
+            blacklist::add_blacklist(&mut cfg, &path, &tools)?;
+            println!("blacklisted {path} for {}", tools.join(", "));
+            Ok(())
+        }
+        Commands::Allow {
+            path,
+            claude,
+            codex,
+            cursor,
+            opencode,
+        } => {
+            warn_if_not_initialized();
+            let tools = blacklist::collect_tool_flags(claude, codex, cursor, opencode);
+            if tools.is_empty() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "at least one tool flag is required (--claude, --codex, --cursor, --opencode)",
+                ));
+            }
+            logging::debug(&format!(
+                "command=allow path={path} tools={tools:?}"
+            ));
+            let mut cfg = config::Config::load_or_default()?;
+            blacklist::remove_blacklist(&mut cfg, &path, &tools)?;
+            println!("allowed {path} for {}", tools.join(", "));
             Ok(())
         }
         Commands::Rollback {

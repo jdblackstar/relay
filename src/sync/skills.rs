@@ -86,6 +86,9 @@ pub(crate) fn sync_skills_with_mode(
             (TOOL_OPENCODE, opencode_enabled, &cfg.opencode_skills_dir),
             (TOOL_CODEX, codex_enabled, &cfg.codex_skills_dir),
         ] {
+            if tool != TOOL_CENTRAL && cfg.is_blacklisted(&format!("skills/{name}"), tool) {
+                continue;
+            }
             let updated = sync_skill_for_tool(
                 tool, enabled, base_dir, &name, winner, &variants, log_mode, mode, history,
             )?;
@@ -441,6 +444,29 @@ mod tests {
             .frontmatter
             .unwrap_or_default()
             .contains("name: central"));
+        Ok(())
+    }
+
+    #[test]
+    fn sync_skills_blacklist_skips_tool_but_syncs_others() -> io::Result<()> {
+        let (_tmp, mut cfg) = setup()?;
+
+        let claude_skill = write_skill(&cfg.claude_skills_dir, "plan", &doc("claude", "Body"))?;
+
+        // Blacklist skills/plan from codex
+        cfg.blacklist
+            .entry("skills/plan".to_string())
+            .or_default()
+            .push("codex".to_string());
+
+        sync_skills(&cfg, SyncLogMode::Quiet)?;
+
+        // Central should get it
+        assert!(cfg.central_skills_dir.join("plan/SKILL.md").exists());
+        // Claude should keep it
+        assert!(claude_skill.join("SKILL.md").exists());
+        // Codex should NOT get it
+        assert!(!cfg.codex_skills_dir.join("plan/SKILL.md").exists());
         Ok(())
     }
 

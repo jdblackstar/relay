@@ -69,7 +69,10 @@ pub(crate) fn sync_commands_with_mode(
             (TOOL_OPENCODE, opencode_enabled, &cfg.opencode_commands_dir),
             (TOOL_CODEX, codex_enabled, &cfg.codex_dir),
         ] {
-            if enabled {
+            if enabled
+                && (tool == TOOL_CENTRAL
+                    || !cfg.is_blacklisted(&format!("commands/{name}"), tool))
+            {
                 let target_path = base_dir.join(&name);
                 let existing = variants
                     .iter()
@@ -236,6 +239,34 @@ mod tests {
         assert!(read_frontmatter(&central)?
             .unwrap_or_default()
             .contains("name: central"));
+        Ok(())
+    }
+
+    #[test]
+    fn sync_commands_blacklist_skips_tool_but_syncs_others() -> io::Result<()> {
+        let (_tmp, mut cfg) = setup()?;
+
+        let claude = cfg.claude_dir.join("review.md");
+        let codex = cfg.codex_dir.join("review.md");
+        let central = cfg.central_dir.join("review.md");
+
+        write_plain(&claude, &doc("claude", "Body"))?;
+
+        // Blacklist review.md from codex
+        cfg.blacklist
+            .entry("commands/review.md".to_string())
+            .or_default()
+            .push("codex".to_string());
+
+        sync_commands(&cfg, LogMode::Quiet)?;
+
+        // Central should get it
+        assert!(central.exists());
+        assert_eq!(read_body(&central)?, "Body");
+        // Codex should NOT get it
+        assert!(!codex.exists());
+        // Claude should keep it
+        assert!(claude.exists());
         Ok(())
     }
 

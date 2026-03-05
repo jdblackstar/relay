@@ -175,6 +175,7 @@ mod tests {
                 TOOL_OPENCODE.to_string(),
             ],
             verified_versions: std::collections::HashMap::new(),
+            blacklist: std::collections::HashMap::new(),
             central_dir: tmp.path().join("central/commands"),
             central_skills_dir: tmp.path().join("central/skills"),
             central_agents_dir: tmp.path().join("central/agents"),
