@@ -9,6 +9,24 @@ use std::collections::HashSet;
 use std::fs;
 use std::io;
 
+const LEGACY_AGENTS_BLACKLIST_KEY: &str = "agents/AGENTS.md";
+const CODEX_AGENTS_BLACKLIST_KEY: &str = "agents/codex/AGENTS.md";
+const OPENCODE_AGENTS_BLACKLIST_KEY: &str = "agents/opencode/AGENTS.md";
+
+fn is_agent_target_blacklisted(cfg: &Config, tool: &str) -> bool {
+    match tool {
+        TOOL_CODEX => {
+            cfg.is_blacklisted(CODEX_AGENTS_BLACKLIST_KEY, TOOL_CODEX)
+                || cfg.is_blacklisted(LEGACY_AGENTS_BLACKLIST_KEY, TOOL_CODEX)
+        }
+        TOOL_OPENCODE => {
+            cfg.is_blacklisted(OPENCODE_AGENTS_BLACKLIST_KEY, TOOL_OPENCODE)
+                || cfg.is_blacklisted(LEGACY_AGENTS_BLACKLIST_KEY, TOOL_OPENCODE)
+        }
+        _ => false,
+    }
+}
+
 #[cfg(any(test, coverage))]
 pub(crate) fn sync_agents(cfg: &Config, log_mode: LogMode) -> io::Result<SyncStats> {
     let mut history = None;
@@ -79,7 +97,7 @@ pub(crate) fn sync_agents_with_mode(
         if !enabled {
             continue;
         }
-        if tool != TOOL_CENTRAL && cfg.is_blacklisted("agents/AGENTS.md", tool) {
+        if tool != TOOL_CENTRAL && is_agent_target_blacklisted(cfg, tool) {
             continue;
         }
         let existing = agent_variants
@@ -184,9 +202,9 @@ mod tests {
         write_plain(&cfg.opencode_agents_file, &doc("opencode", "OpenCode agent"))?;
         crate::sync::test_support::set_mtime(&cfg.codex_agents_file, 2_200_000_200)?;
 
-        // Blacklist agents from opencode
+        // Legacy blacklist key should still be honored for compatibility.
         cfg.blacklist
-            .entry("agents/AGENTS.md".to_string())
+            .entry(LEGACY_AGENTS_BLACKLIST_KEY.to_string())
             .or_default()
             .push("opencode".to_string());
 
@@ -197,6 +215,46 @@ mod tests {
         // OpenCode should NOT be updated (blacklisted)
         let opencode_body = read_body(&cfg.opencode_agents_file)?;
         assert_eq!(opencode_body, "OpenCode agent");
+        Ok(())
+    }
+
+    #[test]
+    fn sync_agents_blacklist_codex_key_skips_codex_only() -> io::Result<()> {
+        let (_tmp, mut cfg) = setup()?;
+
+        write_plain(&cfg.codex_agents_file, &doc("codex", "Codex old"))?;
+        write_plain(&cfg.opencode_agents_file, &doc("opencode", "OpenCode new"))?;
+        crate::sync::test_support::set_mtime(&cfg.opencode_agents_file, 2_500_000_200)?;
+
+        cfg.blacklist
+            .entry(CODEX_AGENTS_BLACKLIST_KEY.to_string())
+            .or_default()
+            .push(TOOL_CODEX.to_string());
+
+        sync_agents(&cfg, LogMode::Quiet)?;
+
+        assert_eq!(read_body(&cfg.codex_agents_file)?, "Codex old");
+        assert_eq!(read_body(&cfg.opencode_agents_file)?, "OpenCode new");
+        Ok(())
+    }
+
+    #[test]
+    fn sync_agents_blacklist_opencode_key_skips_opencode_only() -> io::Result<()> {
+        let (_tmp, mut cfg) = setup()?;
+
+        write_plain(&cfg.codex_agents_file, &doc("codex", "Codex new"))?;
+        write_plain(&cfg.opencode_agents_file, &doc("opencode", "OpenCode old"))?;
+        crate::sync::test_support::set_mtime(&cfg.codex_agents_file, 2_600_000_200)?;
+
+        cfg.blacklist
+            .entry(OPENCODE_AGENTS_BLACKLIST_KEY.to_string())
+            .or_default()
+            .push(TOOL_OPENCODE.to_string());
+
+        sync_agents(&cfg, LogMode::Quiet)?;
+
+        assert_eq!(read_body(&cfg.codex_agents_file)?, "Codex new");
+        assert_eq!(read_body(&cfg.opencode_agents_file)?, "OpenCode old");
         Ok(())
     }
 
