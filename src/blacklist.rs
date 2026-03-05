@@ -4,12 +4,12 @@ use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
-pub fn collect_tool_flags(
-    claude: bool,
-    codex: bool,
-    cursor: bool,
-    opencode: bool,
-) -> Vec<String> {
+const LEGACY_AGENTS_BLACKLIST_KEY: &str = "agents/AGENTS.md";
+const CODEX_AGENTS_BLACKLIST_KEY: &str = "agents/codex/AGENTS.md";
+const OPENCODE_AGENTS_BLACKLIST_KEY: &str = "agents/opencode/AGENTS.md";
+const CODEX_RULES_BLACKLIST_KEY: &str = "rules/codex/default.rules";
+
+pub fn collect_tool_flags(claude: bool, codex: bool, cursor: bool, opencode: bool) -> Vec<String> {
     let mut tools = Vec::new();
     if claude {
         tools.push(TOOL_CLAUDE.to_string());
@@ -28,6 +28,7 @@ pub fn collect_tool_flags(
 
 #[cfg_attr(any(test, coverage), allow(dead_code))]
 pub fn add_blacklist(cfg: &mut Config, path: &str, tools: &[String]) -> io::Result<()> {
+    validate_blacklist_path(path)?;
     let entry = cfg.blacklist.entry(path.to_string()).or_default();
     for tool in tools {
         if !entry.iter().any(|t| t == tool) {
@@ -94,6 +95,33 @@ fn push_unique(paths: &mut Vec<PathBuf>, candidate: PathBuf) {
     }
 }
 
+fn is_supported_agents_blacklist_path(path: &str) -> bool {
+    matches!(
+        path,
+        LEGACY_AGENTS_BLACKLIST_KEY | CODEX_AGENTS_BLACKLIST_KEY | OPENCODE_AGENTS_BLACKLIST_KEY
+    )
+}
+
+fn validate_blacklist_path(path: &str) -> io::Result<()> {
+    if path.starts_with("agents/") && !is_supported_agents_blacklist_path(path) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "invalid agents blacklist path '{path}'; supported paths: {LEGACY_AGENTS_BLACKLIST_KEY}, {CODEX_AGENTS_BLACKLIST_KEY}, {OPENCODE_AGENTS_BLACKLIST_KEY}"
+            ),
+        ));
+    }
+    if path.starts_with("rules/") && path != CODEX_RULES_BLACKLIST_KEY {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "invalid rules blacklist path '{path}'; supported path: {CODEX_RULES_BLACKLIST_KEY}"
+            ),
+        ));
+    }
+    Ok(())
+}
+
 fn retroactive_delete(cfg: &Config, path: &str, tools: &[String]) -> io::Result<()> {
     let mut recorder = HistoryRecorder::new(cfg, &format!("blacklist:{path}"))?;
     for tool in tools {
@@ -147,16 +175,18 @@ pub fn resolve_tool_paths(cfg: &Config, relative_path: &str, tool: &str) -> Vec<
             TOOL_OPENCODE => paths.push(cfg.opencode_skills_dir.join(suffix)),
             _ => {}
         }
-    } else if relative_path.starts_with("agents/") {
-        match tool {
-            TOOL_CODEX => paths.push(cfg.codex_agents_file.clone()),
-            TOOL_OPENCODE => paths.push(cfg.opencode_agents_file.clone()),
+    } else if is_supported_agents_blacklist_path(relative_path) {
+        match (relative_path, tool) {
+            (LEGACY_AGENTS_BLACKLIST_KEY, TOOL_CODEX)
+            | (CODEX_AGENTS_BLACKLIST_KEY, TOOL_CODEX) => paths.push(cfg.codex_agents_file.clone()),
+            (LEGACY_AGENTS_BLACKLIST_KEY, TOOL_OPENCODE)
+            | (OPENCODE_AGENTS_BLACKLIST_KEY, TOOL_OPENCODE) => {
+                paths.push(cfg.opencode_agents_file.clone())
+            }
             _ => {}
         }
-    } else if relative_path.starts_with("rules/") {
-        if tool == TOOL_CODEX {
-            paths.push(cfg.codex_rules_file.clone());
-        }
+    } else if relative_path == CODEX_RULES_BLACKLIST_KEY && tool == TOOL_CODEX {
+        paths.push(cfg.codex_rules_file.clone());
     }
 
     paths
@@ -240,7 +270,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let cfg = make_config(&tmp);
         let paths = resolve_tool_paths(&cfg, "agents/AGENTS.md", TOOL_CODEX);
-        assert_eq!(paths.len(), 1);
+        assert_eq!(paths, vec![cfg.codex_agents_file.clone()]);
 
         let paths = resolve_tool_paths(&cfg, "agents/AGENTS.md", TOOL_CLAUDE);
         assert!(paths.is_empty());
@@ -251,10 +281,74 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let cfg = make_config(&tmp);
         let paths = resolve_tool_paths(&cfg, "rules/codex/default.rules", TOOL_CODEX);
-        assert_eq!(paths.len(), 1);
+        assert_eq!(paths, vec![cfg.codex_rules_file.clone()]);
 
         let paths = resolve_tool_paths(&cfg, "rules/codex/default.rules", TOOL_CLAUDE);
         assert!(paths.is_empty());
+    }
+
+    #[test]
+    fn resolve_tool_paths_agents_require_canonical_keys() {
+        let tmp = TempDir::new().unwrap();
+        let cfg = make_config(&tmp);
+
+        let codex_paths = resolve_tool_paths(&cfg, "agents/codex/AGENTS.md", TOOL_CODEX);
+        assert_eq!(codex_paths, vec![cfg.codex_agents_file.clone()]);
+        let codex_mismatch = resolve_tool_paths(&cfg, "agents/codex/AGENTS.md", TOOL_OPENCODE);
+        assert!(codex_mismatch.is_empty());
+
+        let opencode_paths = resolve_tool_paths(&cfg, "agents/opencode/AGENTS.md", TOOL_OPENCODE);
+        assert_eq!(opencode_paths, vec![cfg.opencode_agents_file.clone()]);
+        let opencode_mismatch = resolve_tool_paths(&cfg, "agents/opencode/AGENTS.md", TOOL_CODEX);
+        assert!(opencode_mismatch.is_empty());
+    }
+
+    #[test]
+    fn resolve_tool_paths_rejects_noncanonical_agents_and_rules_paths() {
+        let tmp = TempDir::new().unwrap();
+        let cfg = make_config(&tmp);
+
+        for relative_path in [
+            "agents/",
+            "agents/foo",
+            "agents/codex/",
+            "agents/opencode/foo.md",
+            "rules/",
+            "rules/foo.rules",
+            "rules/codex/",
+            "rules/codex/other.rules",
+        ] {
+            for tool in [TOOL_CODEX, TOOL_OPENCODE] {
+                assert!(
+                    resolve_tool_paths(&cfg, relative_path, tool).is_empty(),
+                    "expected no targets for {relative_path} ({tool})",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn validate_blacklist_path_rejects_noncanonical_agents_and_rules() {
+        for path in [
+            "agents/",
+            "agents/foo",
+            "agents/codex/",
+            "rules/",
+            "rules/foo",
+            "rules/codex/other.rules",
+        ] {
+            let err = validate_blacklist_path(path).unwrap_err();
+            assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+        }
+
+        for path in [
+            "agents/AGENTS.md",
+            "agents/codex/AGENTS.md",
+            "agents/opencode/AGENTS.md",
+            "rules/codex/default.rules",
+        ] {
+            assert!(validate_blacklist_path(path).is_ok());
+        }
     }
 
     #[test]
