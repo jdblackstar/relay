@@ -70,13 +70,16 @@ pub(crate) fn sync_agents_with_mode(
     }
     let source = &winner.doc;
 
-    for (enabled, path) in [
-        (codex_enabled, &cfg.codex_agents_file),
-        (opencode_enabled, &cfg.opencode_agents_file),
-        (true, &central_codex),
-        (true, &central_opencode),
+    for (tool, enabled, path) in [
+        (TOOL_CODEX, codex_enabled, &cfg.codex_agents_file),
+        (TOOL_OPENCODE, opencode_enabled, &cfg.opencode_agents_file),
+        (TOOL_CENTRAL, true, &central_codex),
+        (TOOL_CENTRAL, true, &central_opencode),
     ] {
         if !enabled {
+            continue;
+        }
+        if tool != TOOL_CENTRAL && cfg.is_blacklisted("agents/AGENTS.md", tool) {
             continue;
         }
         let existing = agent_variants
@@ -170,6 +173,30 @@ mod tests {
         assert!(read_frontmatter(&cfg.opencode_agents_file)?
             .unwrap_or_default()
             .contains("name: central"));
+        Ok(())
+    }
+
+    #[test]
+    fn sync_agents_blacklist_skips_tool() -> io::Result<()> {
+        let (_tmp, mut cfg) = setup()?;
+
+        write_plain(&cfg.codex_agents_file, &doc("codex", "Codex agent"))?;
+        write_plain(&cfg.opencode_agents_file, &doc("opencode", "OpenCode agent"))?;
+        crate::sync::test_support::set_mtime(&cfg.codex_agents_file, 2_200_000_200)?;
+
+        // Blacklist agents from opencode
+        cfg.blacklist
+            .entry("agents/AGENTS.md".to_string())
+            .or_default()
+            .push("opencode".to_string());
+
+        sync_agents(&cfg, LogMode::Quiet)?;
+
+        // Codex wins and codex file should be updated (it's the winner)
+        assert!(cfg.codex_agents_file.exists());
+        // OpenCode should NOT be updated (blacklisted)
+        let opencode_body = read_body(&cfg.opencode_agents_file)?;
+        assert_eq!(opencode_body, "OpenCode agent");
         Ok(())
     }
 

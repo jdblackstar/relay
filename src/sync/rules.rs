@@ -66,11 +66,16 @@ pub(crate) fn sync_rules_with_mode(
         );
     }
     let winner_contents = fs::read(&winner.path)?;
-    for (enabled, path) in [
-        (codex_enabled, &cfg.codex_rules_file),
-        (true, &central_path),
+    for (tool, enabled, path) in [
+        (TOOL_CODEX, codex_enabled, &cfg.codex_rules_file),
+        (TOOL_CENTRAL, true, &central_path),
     ] {
         if !enabled {
+            continue;
+        }
+        if tool != TOOL_CENTRAL
+            && cfg.is_blacklisted("rules/codex/default.rules", tool)
+        {
             continue;
         }
         if write_raw_if_changed(path, &winner_contents, mode, history)? {
@@ -123,6 +128,27 @@ mod tests {
 
         let central = cfg.central_rules_dir.join("codex/default.rules");
         assert_eq!(fs::read_to_string(&central)?, "rule(\"x\")");
+        Ok(())
+    }
+
+    #[test]
+    fn sync_rules_blacklist_skips_codex() -> io::Result<()> {
+        let (_tmp, mut cfg) = setup()?;
+        let central = cfg.central_rules_dir.join("codex/default.rules");
+        write_plain(&central, "rule(\"new\")")?;
+        crate::sync::test_support::set_mtime(&central, 2_500_000_100)?;
+
+        cfg.blacklist
+            .entry("rules/codex/default.rules".to_string())
+            .or_default()
+            .push("codex".to_string());
+
+        sync_rules(&cfg, LogMode::Quiet)?;
+
+        // Codex should NOT get updated
+        assert!(!cfg.codex_rules_file.exists());
+        // Central should still exist
+        assert!(central.exists());
         Ok(())
     }
 

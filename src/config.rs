@@ -14,6 +14,8 @@ pub const TOOL_OPENCODE: &str = "opencode";
 pub struct Config {
     pub enabled_tools: Vec<String>,
     pub verified_versions: HashMap<String, String>,
+    #[serde(default)]
+    pub blacklist: HashMap<String, Vec<String>>,
     pub central_dir: PathBuf,
     pub central_skills_dir: PathBuf,
     pub central_agents_dir: PathBuf,
@@ -34,6 +36,7 @@ pub struct Config {
 struct PartialConfig {
     pub enabled_tools: Option<Vec<String>>,
     pub verified_versions: Option<HashMap<String, String>>,
+    pub blacklist: Option<HashMap<String, Vec<String>>>,
     pub central_dir: Option<PathBuf>,
     pub central_skills_dir: Option<PathBuf>,
     pub central_agents_dir: Option<PathBuf>,
@@ -69,6 +72,7 @@ impl Config {
                 TOOL_OPENCODE.to_string(),
             ],
             verified_versions: HashMap::new(),
+            blacklist: HashMap::new(),
             central_dir: relay_config_root.join("commands"),
             central_skills_dir: relay_config_root.join("skills"),
             central_agents_dir: relay_config_root.join("agents"),
@@ -152,6 +156,7 @@ impl Config {
                     cfg.verified_versions
                         .unwrap_or_else(|| defaults.verified_versions.clone()),
                 ),
+                blacklist: cfg.blacklist.unwrap_or_default(),
                 central_dir: cfg.central_dir.unwrap_or(defaults.central_dir),
                 central_skills_dir: cfg
                     .central_skills_dir
@@ -205,6 +210,12 @@ impl Config {
         self.verified_versions
             .get(&tool.to_ascii_lowercase())
             .map(String::as_str)
+    }
+
+    pub fn is_blacklisted(&self, relative_path: &str, tool: &str) -> bool {
+        self.blacklist
+            .get(relative_path)
+            .is_some_and(|tools| tools.iter().any(|t| t == tool))
     }
 
     /// Returns `true` when a config file exists at the primary or legacy path.
@@ -584,6 +595,36 @@ mod tests {
         } else {
             env::remove_var(key);
         }
+    }
+
+    #[test]
+    fn is_blacklisted_checks_tool() {
+        let mut cfg = Config {
+            enabled_tools: vec![],
+            verified_versions: HashMap::new(),
+            blacklist: HashMap::new(),
+            central_dir: PathBuf::from("/tmp/central"),
+            central_skills_dir: PathBuf::from("/tmp/skills"),
+            central_agents_dir: PathBuf::from("/tmp/agents"),
+            central_rules_dir: PathBuf::from("/tmp/rules"),
+            claude_dir: PathBuf::from("/tmp/claude"),
+            claude_skills_dir: PathBuf::from("/tmp/claude_skills"),
+            cursor_dir: PathBuf::from("/tmp/cursor"),
+            opencode_commands_dir: PathBuf::from("/tmp/oc"),
+            opencode_skills_dir: PathBuf::from("/tmp/os"),
+            opencode_agents_file: PathBuf::from("/tmp/oa"),
+            codex_dir: PathBuf::from("/tmp/codex"),
+            codex_skills_dir: PathBuf::from("/tmp/codex_skills"),
+            codex_rules_file: PathBuf::from("/tmp/rules"),
+            codex_agents_file: PathBuf::from("/tmp/agents"),
+        };
+
+        assert!(!cfg.is_blacklisted("commands/review.md", "claude"));
+        cfg.blacklist
+            .insert("commands/review.md".to_string(), vec!["claude".to_string()]);
+        assert!(cfg.is_blacklisted("commands/review.md", "claude"));
+        assert!(!cfg.is_blacklisted("commands/review.md", "codex"));
+        assert!(!cfg.is_blacklisted("commands/other.md", "claude"));
     }
 
     #[inline(never)]
