@@ -3,15 +3,14 @@ use super::shared::{
     MarkdownVariant, CONFLICT_WINDOW_NS, TOOL_CENTRAL,
 };
 use super::{ExecutionMode, LogMode, SyncStats};
+use crate::blacklist::{
+    CODEX_AGENTS_BLACKLIST_KEY, LEGACY_AGENTS_BLACKLIST_KEY, OPENCODE_AGENTS_BLACKLIST_KEY,
+};
 use crate::config::{Config, TOOL_CODEX, TOOL_OPENCODE};
 use crate::history::HistoryRecorder;
 use std::collections::HashSet;
 use std::fs;
 use std::io;
-
-const LEGACY_AGENTS_BLACKLIST_KEY: &str = "agents/AGENTS.md";
-const CODEX_AGENTS_BLACKLIST_KEY: &str = "agents/codex/AGENTS.md";
-const OPENCODE_AGENTS_BLACKLIST_KEY: &str = "agents/opencode/AGENTS.md";
 
 fn is_agent_target_blacklisted(cfg: &Config, tool: &str) -> bool {
     match tool {

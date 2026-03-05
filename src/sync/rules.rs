@@ -3,6 +3,7 @@ use super::shared::{
     TOOL_CENTRAL,
 };
 use super::{ExecutionMode, LogMode, SyncStats};
+use crate::blacklist::CODEX_RULES_BLACKLIST_KEY;
 use crate::config::{Config, TOOL_CODEX};
 use crate::history::HistoryRecorder;
 use std::collections::HashSet;
@@ -73,9 +74,7 @@ pub(crate) fn sync_rules_with_mode(
         if !enabled {
             continue;
         }
-        if tool != TOOL_CENTRAL
-            && cfg.is_blacklisted("rules/codex/default.rules", tool)
-        {
+        if tool != TOOL_CENTRAL && cfg.is_blacklisted(CODEX_RULES_BLACKLIST_KEY, tool) {
             continue;
         }
         if write_raw_if_changed(path, &winner_contents, mode, history)? {

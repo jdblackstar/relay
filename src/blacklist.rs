@@ -4,10 +4,10 @@ use std::fs;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
-const LEGACY_AGENTS_BLACKLIST_KEY: &str = "agents/AGENTS.md";
-const CODEX_AGENTS_BLACKLIST_KEY: &str = "agents/codex/AGENTS.md";
-const OPENCODE_AGENTS_BLACKLIST_KEY: &str = "agents/opencode/AGENTS.md";
-const CODEX_RULES_BLACKLIST_KEY: &str = "rules/codex/default.rules";
+pub(crate) const LEGACY_AGENTS_BLACKLIST_KEY: &str = "agents/AGENTS.md";
+pub(crate) const CODEX_AGENTS_BLACKLIST_KEY: &str = "agents/codex/AGENTS.md";
+pub(crate) const OPENCODE_AGENTS_BLACKLIST_KEY: &str = "agents/opencode/AGENTS.md";
+pub(crate) const CODEX_RULES_BLACKLIST_KEY: &str = "rules/codex/default.rules";
 
 pub fn collect_tool_flags(claude: bool, codex: bool, cursor: bool, opencode: bool) -> Vec<String> {
     let mut tools = Vec::new();
