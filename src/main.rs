@@ -229,18 +229,15 @@ fn main() -> std::io::Result<()> {
                     if !quiet {
                         report::print_conflict_summary(&preflight.conflicts);
                     }
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        format!(
-                            "sync aborted due to {} conflict{}",
-                            preflight.conflicts.len(),
-                            if preflight.conflicts.len() == 1 {
-                                ""
-                            } else {
-                                "s"
-                            }
-                        ),
-                    ));
+                    return Err(std::io::Error::other(format!(
+                        "sync aborted due to {} conflict{}",
+                        preflight.conflicts.len(),
+                        if preflight.conflicts.len() == 1 {
+                            ""
+                        } else {
+                            "s"
+                        }
+                    )));
                 }
                 if mode == sync::ExecutionMode::Plan {
                     preflight
