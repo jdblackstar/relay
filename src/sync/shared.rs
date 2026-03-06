@@ -1,7 +1,7 @@
-use super::{ExecutionMode, LogMode};
+use super::{ExecutionMode, LogMode, SyncConflict, SyncItemKind};
 use crate::history::HistoryRecorder;
 use std::collections::hash_map::DefaultHasher;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::io;
@@ -113,6 +113,45 @@ pub(crate) fn select_markdown_winner(variants: &[MarkdownVariant]) -> &MarkdownV
         .iter()
         .max_by_key(|variant| (variant.mtime, tool_order(variant.tool)))
         .expect("winner available")
+}
+
+pub(crate) fn markdown_conflict_for_variants(
+    name: &str,
+    item_kind: SyncItemKind,
+    variants: &[MarkdownVariant],
+    winner: &'static str,
+    winner_hash: u64,
+) -> Option<SyncConflict> {
+    if variants.len() < 2 {
+        return None;
+    }
+    let mut min = u128::MAX;
+    let mut max = 0u128;
+    let mut hashes = HashSet::new();
+    for variant in variants {
+        min = min.min(variant.mtime);
+        max = max.max(variant.mtime);
+        hashes.insert(variant.doc.body_hash);
+    }
+    if hashes.len() < 2 || max.saturating_sub(min) > CONFLICT_WINDOW_NS {
+        return None;
+    }
+
+    let mut others = Vec::new();
+    for variant in variants {
+        if variant.tool != winner
+            && variant.doc.body_hash != winner_hash
+            && !others.contains(&variant.tool)
+        {
+            others.push(variant.tool);
+        }
+    }
+    Some(SyncConflict {
+        kind: item_kind,
+        name: name.to_string(),
+        winner,
+        others,
+    })
 }
 
 #[allow(clippy::too_many_arguments)]

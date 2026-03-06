@@ -1,6 +1,6 @@
 use super::shared::{
-    log_action, read_markdown_variant, select_markdown_winner, update_markdown_target,
-    MarkdownVariant, CONFLICT_WINDOW_NS, TOOL_CENTRAL,
+    log_action, markdown_conflict_for_variants, read_markdown_variant, select_markdown_winner,
+    update_markdown_target, MarkdownVariant, TOOL_CENTRAL,
 };
 use super::{ExecutionMode, LogMode, SyncConflict, SyncItemKind, SyncStats};
 use crate::blacklist::{
@@ -8,7 +8,6 @@ use crate::blacklist::{
 };
 use crate::config::{Config, TOOL_CODEX, TOOL_OPENCODE};
 use crate::history::HistoryRecorder;
-use std::collections::HashSet;
 use std::io;
 
 #[cfg(test)]
@@ -85,8 +84,9 @@ pub(crate) fn sync_agents_with_mode(
     }
 
     let winner = select_markdown_winner(&agent_variants);
-    if let Some(conflict) = conflict_for_variants(
+    if let Some(conflict) = markdown_conflict_for_variants(
         "AGENTS.md",
+        SyncItemKind::Agent,
         &agent_variants,
         winner.tool,
         winner.doc.body_hash,
@@ -127,45 +127,6 @@ pub(crate) fn sync_agents_with_mode(
 
     Ok(stats)
 }
-
-fn conflict_for_variants(
-    name: &str,
-    variants: &[MarkdownVariant],
-    winner: &'static str,
-    winner_hash: u64,
-) -> Option<SyncConflict> {
-    if variants.len() < 2 {
-        return None;
-    }
-    let mut min = u128::MAX;
-    let mut max = 0u128;
-    let mut hashes = HashSet::new();
-    for variant in variants {
-        min = min.min(variant.mtime);
-        max = max.max(variant.mtime);
-        hashes.insert(variant.doc.body_hash);
-    }
-    if hashes.len() < 2 || max.saturating_sub(min) > CONFLICT_WINDOW_NS {
-        return None;
-    }
-
-    let mut others = Vec::new();
-    for variant in variants {
-        if variant.tool != winner
-            && variant.doc.body_hash != winner_hash
-            && !others.contains(&variant.tool)
-        {
-            others.push(variant.tool);
-        }
-    }
-    Some(SyncConflict {
-        kind: SyncItemKind::Agent,
-        name: name.to_string(),
-        winner,
-        others,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
