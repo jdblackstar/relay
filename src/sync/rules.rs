@@ -1,12 +1,11 @@
 use super::shared::{
-    file_mtime_value, hash_bytes, log_action, tool_order, write_raw_if_changed, CONFLICT_WINDOW_NS,
-    TOOL_CENTRAL,
+    conflict_for_variants, file_mtime_value, hash_bytes, log_action, tool_order,
+    write_raw_if_changed, TOOL_CENTRAL,
 };
 use super::{ExecutionMode, LogMode, SyncConflict, SyncItemKind, SyncStats};
 use crate::blacklist::CODEX_RULES_BLACKLIST_KEY;
 use crate::config::{Config, TOOL_CODEX};
 use crate::history::HistoryRecorder;
-use std::collections::HashSet;
 use std::fs;
 use std::io;
 
@@ -64,9 +63,13 @@ pub(crate) fn sync_rules_with_mode(
     else {
         return Ok(stats);
     };
-    if let Some(conflict) =
-        conflict_for_variants("codex/default.rules", &variants, winner.tool, winner.hash)
-    {
+    if let Some(conflict) = conflict_for_variants(
+        "codex/default.rules",
+        SyncItemKind::Rule,
+        &variants,
+        winner.tool,
+        winner.hash,
+    ) {
         conflicts.push(conflict);
         log_action(
             log_mode,
@@ -108,40 +111,18 @@ struct RuleVariant {
     hash: u64,
 }
 
-fn conflict_for_variants(
-    name: &str,
-    variants: &[RuleVariant],
-    winner: &'static str,
-    winner_hash: u64,
-) -> Option<SyncConflict> {
-    if variants.len() < 2 {
-        return None;
-    }
-    let mut min = u128::MAX;
-    let mut max = 0u128;
-    let mut hashes = HashSet::new();
-    for variant in variants {
-        min = min.min(variant.mtime);
-        max = max.max(variant.mtime);
-        hashes.insert(variant.hash);
-    }
-    if hashes.len() < 2 || max.saturating_sub(min) > CONFLICT_WINDOW_NS {
-        return None;
+impl super::shared::ConflictVariant for RuleVariant {
+    fn tool(&self) -> &'static str {
+        self.tool
     }
 
-    let mut others = Vec::new();
-    for variant in variants {
-        if variant.tool != winner && variant.hash != winner_hash && !others.contains(&variant.tool)
-        {
-            others.push(variant.tool);
-        }
+    fn hash(&self) -> u64 {
+        self.hash
     }
-    Some(SyncConflict {
-        kind: SyncItemKind::Rule,
-        name: name.to_string(),
-        winner,
-        others,
-    })
+
+    fn mtime(&self) -> u128 {
+        self.mtime
+    }
 }
 
 #[cfg(test)]

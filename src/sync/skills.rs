@@ -1,14 +1,13 @@
 use super::shared::{
-    collect_names, file_mtime_value_from_meta, hash_bytes, list_if, log_action, read_markdown,
-    read_visible_entry, required_frontmatter_hash, select_frontmatter_for_target, tool_order,
-    write_file, CONFLICT_WINDOW_NS, TOOL_CENTRAL,
+    collect_names, conflict_for_variants, file_mtime_value_from_meta, hash_bytes, list_if,
+    log_action, read_markdown, read_visible_entry, required_frontmatter_hash,
+    select_frontmatter_for_target, tool_order, write_file, TOOL_CENTRAL,
 };
 use super::{ExecutionMode, LogMode as SyncLogMode, SyncConflict, SyncItemKind, SyncStats};
 use crate::config::{Config, TOOL_CLAUDE, TOOL_CODEX, TOOL_OPENCODE};
 use crate::history::HistoryRecorder;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::env;
 use std::fs;
 use std::hash::{Hash, Hasher};
@@ -26,6 +25,20 @@ struct SkillVariant {
     tool: &'static str,
     path: PathBuf,
     digest: DirDigest,
+}
+
+impl super::shared::ConflictVariant for SkillVariant {
+    fn tool(&self) -> &'static str {
+        self.tool
+    }
+
+    fn hash(&self) -> u64 {
+        self.digest.body_hash
+    }
+
+    fn mtime(&self) -> u128 {
+        self.digest.mtime
+    }
 }
 
 #[cfg(any(test, coverage))]
@@ -82,7 +95,13 @@ pub(crate) fn sync_skills_with_mode(
         }
         let winner = select_skill_winner(&variants);
         if let Some(conflict) =
-            conflict_for_variants(&name, &variants, winner.tool, winner.digest.body_hash)
+            conflict_for_variants(
+                &name,
+                SyncItemKind::Skill,
+                &variants,
+                winner.tool,
+                winner.digest.body_hash,
+            )
         {
             conflicts.push(conflict);
             log_action(
@@ -111,44 +130,6 @@ pub(crate) fn sync_skills_with_mode(
     }
 
     Ok(stats)
-}
-
-fn conflict_for_variants(
-    name: &str,
-    variants: &[SkillVariant],
-    winner: &'static str,
-    winner_hash: u64,
-) -> Option<SyncConflict> {
-    if variants.len() < 2 {
-        return None;
-    }
-    let mut min = u128::MAX;
-    let mut max = 0u128;
-    let mut hashes = HashSet::new();
-    for variant in variants {
-        min = min.min(variant.digest.mtime);
-        max = max.max(variant.digest.mtime);
-        hashes.insert(variant.digest.body_hash);
-    }
-    if hashes.len() < 2 || max.saturating_sub(min) > CONFLICT_WINDOW_NS {
-        return None;
-    }
-
-    let mut others = Vec::new();
-    for variant in variants {
-        if variant.tool != winner
-            && variant.digest.body_hash != winner_hash
-            && !others.contains(&variant.tool)
-        {
-            others.push(variant.tool);
-        }
-    }
-    Some(SyncConflict {
-        kind: SyncItemKind::Skill,
-        name: name.to_string(),
-        winner,
-        others,
-    })
 }
 
 #[allow(clippy::too_many_arguments)]
