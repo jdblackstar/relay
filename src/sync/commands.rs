@@ -3,17 +3,26 @@ use super::shared::{
     select_markdown_winner, update_markdown_target, MarkdownVariant, CONFLICT_WINDOW_NS,
     TOOL_CENTRAL,
 };
-use super::{ExecutionMode, LogMode, SyncStats};
+use super::{ExecutionMode, LogMode, SyncConflict, SyncItemKind, SyncStats};
 use crate::config::{Config, TOOL_CLAUDE, TOOL_CODEX, TOOL_CURSOR, TOOL_OPENCODE};
 use crate::history::HistoryRecorder;
-use std::collections::HashSet;
-use std::fs;
+use std::collections::{HashMap, HashSet};
 use std::io;
+
+#[cfg(test)]
+use std::fs;
 
 #[cfg(any(test, coverage))]
 pub(crate) fn sync_commands(cfg: &Config, log_mode: LogMode) -> io::Result<SyncStats> {
     let mut history = None;
-    sync_commands_with_mode(cfg, log_mode, ExecutionMode::Apply, &mut history)
+    let mut conflicts = Vec::new();
+    sync_commands_with_mode(
+        cfg,
+        log_mode,
+        ExecutionMode::Apply,
+        &mut history,
+        &mut conflicts,
+    )
 }
 
 pub(crate) fn sync_commands_with_mode(
@@ -21,9 +30,9 @@ pub(crate) fn sync_commands_with_mode(
     log_mode: LogMode,
     mode: ExecutionMode,
     history: &mut Option<HistoryRecorder>,
+    conflicts: &mut Vec<SyncConflict>,
 ) -> io::Result<SyncStats> {
     let mut stats = SyncStats::default();
-    fs::create_dir_all(&cfg.central_dir)?;
 
     let claude_enabled = cfg.tool_enabled(TOOL_CLAUDE) && cfg.claude_dir.exists();
     let cursor_enabled = cfg.tool_enabled(TOOL_CURSOR) && cfg.cursor_dir.exists();
@@ -34,7 +43,11 @@ pub(crate) fn sync_commands_with_mode(
     let cursor = list_if(cursor_enabled, &cfg.cursor_dir, list_files)?;
     let opencode = list_if(opencode_enabled, &cfg.opencode_commands_dir, list_files)?;
     let codex = list_if(codex_enabled, &cfg.codex_dir, list_codex_files)?;
-    let central = list_files(&cfg.central_dir)?;
+    let central = if cfg.central_dir.exists() {
+        list_files(&cfg.central_dir)?
+    } else {
+        HashMap::new()
+    };
 
     let names = collect_names(&[&claude, &cursor, &opencode, &codex, &central]);
     for name in names {
@@ -51,7 +64,10 @@ pub(crate) fn sync_commands_with_mode(
             }
         }
         let winner = select_markdown_winner(&variants);
-        if should_warn_conflict(&variants) {
+        if let Some(conflict) =
+            conflict_for_variants(&name, &variants, winner.tool, winner.doc.body_hash)
+        {
+            conflicts.push(conflict);
             log_action(
                 log_mode,
                 &format!(
@@ -70,8 +86,7 @@ pub(crate) fn sync_commands_with_mode(
             (TOOL_CODEX, codex_enabled, &cfg.codex_dir),
         ] {
             if enabled
-                && (tool == TOOL_CENTRAL
-                    || !cfg.is_blacklisted(&format!("commands/{name}"), tool))
+                && (tool == TOOL_CENTRAL || !cfg.is_blacklisted(&format!("commands/{name}"), tool))
             {
                 let target_path = base_dir.join(&name);
                 let existing = variants
@@ -99,9 +114,14 @@ pub(crate) fn sync_commands_with_mode(
     Ok(stats)
 }
 
-fn should_warn_conflict(variants: &[MarkdownVariant]) -> bool {
+fn conflict_for_variants(
+    name: &str,
+    variants: &[MarkdownVariant],
+    winner: &'static str,
+    winner_hash: u64,
+) -> Option<SyncConflict> {
     if variants.len() < 2 {
-        return false;
+        return None;
     }
     let mut min = u128::MAX;
     let mut max = 0u128;
@@ -111,7 +131,25 @@ fn should_warn_conflict(variants: &[MarkdownVariant]) -> bool {
         max = max.max(variant.mtime);
         hashes.insert(variant.doc.body_hash);
     }
-    hashes.len() > 1 && max.saturating_sub(min) <= CONFLICT_WINDOW_NS
+    if hashes.len() < 2 || max.saturating_sub(min) > CONFLICT_WINDOW_NS {
+        return None;
+    }
+
+    let mut others = Vec::new();
+    for variant in variants {
+        if variant.tool != winner
+            && variant.doc.body_hash != winner_hash
+            && !others.contains(&variant.tool)
+        {
+            others.push(variant.tool);
+        }
+    }
+    Some(SyncConflict {
+        kind: SyncItemKind::Command,
+        name: name.to_string(),
+        winner,
+        others,
+    })
 }
 
 #[cfg(test)]
@@ -295,6 +333,39 @@ mod tests {
         assert!(read_frontmatter(&codex)?
             .unwrap_or_default()
             .contains("name: cursor"));
+        Ok(())
+    }
+
+    #[test]
+    fn sync_commands_collects_conflict_details() -> io::Result<()> {
+        let (_tmp, cfg) = setup()?;
+
+        let claude = cfg.claude_dir.join("review.md");
+        let cursor = cfg.cursor_dir.join("review.md");
+        write_plain(&claude, &doc("claude", "Claude body"))?;
+        write_plain(&cursor, &doc("cursor", "Cursor body"))?;
+        crate::sync::test_support::set_mtime(&claude, 100)?;
+        crate::sync::test_support::set_mtime(&cursor, 101)?;
+
+        let mut history = None;
+        let mut conflicts = Vec::new();
+        sync_commands_with_mode(
+            &cfg,
+            LogMode::Quiet,
+            ExecutionMode::Plan,
+            &mut history,
+            &mut conflicts,
+        )?;
+
+        assert_eq!(
+            conflicts,
+            vec![SyncConflict {
+                kind: SyncItemKind::Command,
+                name: "review.md".to_string(),
+                winner: TOOL_CURSOR,
+                others: vec![TOOL_CLAUDE],
+            }]
+        );
         Ok(())
     }
 }

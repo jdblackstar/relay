@@ -1,4 +1,4 @@
-use crate::sync::SyncReport;
+use crate::sync::{SyncConflict, SyncItemKind, SyncReport};
 
 pub fn print_sync_summary(report: &SyncReport) {
     if report.is_empty() {
@@ -22,6 +22,31 @@ pub fn print_plan_summary(report: &SyncReport) {
     );
 }
 
+pub fn print_conflict_summary(conflicts: &[SyncConflict]) {
+    println!("conflicts: {} detected", conflicts.len());
+    for conflict in conflicts {
+        let kind = match conflict.kind {
+            SyncItemKind::Command => "command",
+            SyncItemKind::Skill => "skill",
+            SyncItemKind::Agent => "agent",
+            SyncItemKind::Rule => "rule",
+        };
+        if conflict.others.is_empty() {
+            println!("  {kind} `{}`: chose `{}`", conflict.name, conflict.winner);
+        } else {
+            println!(
+                "  {kind} `{}`: chose `{}`; also changed in `{}`",
+                conflict.name,
+                conflict.winner,
+                conflict.others.join("`, `")
+            );
+        }
+    }
+    println!(
+        "sync aborted due to conflicts; rerun without --fail-on-conflict to accept newest-wins"
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -40,5 +65,24 @@ mod tests {
         };
         print_sync_summary(&report);
         print_plan_summary(&report);
+    }
+
+    #[test]
+    fn print_conflict_summary_smoke() {
+        let conflicts = vec![
+            SyncConflict {
+                kind: SyncItemKind::Command,
+                name: "review.md".to_string(),
+                winner: "cursor",
+                others: vec!["claude"],
+            },
+            SyncConflict {
+                kind: SyncItemKind::Rule,
+                name: "codex/default.rules".to_string(),
+                winner: "central",
+                others: Vec::new(),
+            },
+        ];
+        print_conflict_summary(&conflicts);
     }
 }
