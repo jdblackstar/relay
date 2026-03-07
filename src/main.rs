@@ -185,9 +185,13 @@ fn run_sync_command(
     mode: sync::ExecutionMode,
     fail_on_conflict: bool,
 ) -> std::io::Result<sync::SyncOutcome> {
-    run_sync_command_with(log_mode, quiet, mode, fail_on_conflict, |run_log_mode, run_mode| {
-        sync::sync_all_with_mode(cfg, run_log_mode, run_mode, "sync")
-    })
+    run_sync_command_with(
+        log_mode,
+        quiet,
+        mode,
+        fail_on_conflict,
+        |run_log_mode, run_mode| sync::sync_all_with_mode(cfg, run_log_mode, run_mode, "sync"),
+    )
 }
 
 fn run_sync_command_with<F>(

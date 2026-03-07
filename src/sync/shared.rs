@@ -174,16 +174,6 @@ pub(crate) fn conflict_for_variants<T: ConflictVariant>(
     })
 }
 
-pub(crate) fn markdown_conflict_for_variants(
-    name: &str,
-    item_kind: SyncItemKind,
-    variants: &[MarkdownVariant],
-    winner: &'static str,
-    winner_hash: u64,
-) -> Option<SyncConflict> {
-    conflict_for_variants(name, item_kind, variants, winner, winner_hash)
-}
-
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn update_markdown_target(
     source: &MarkdownDoc,

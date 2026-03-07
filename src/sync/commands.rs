@@ -1,7 +1,7 @@
 use super::shared::{
-    collect_names, list_codex_files, list_files, list_if, log_action,
-    markdown_conflict_for_variants, read_markdown_variant, select_markdown_winner,
-    update_markdown_target, MarkdownVariant, TOOL_CENTRAL,
+    collect_names, conflict_for_variants, list_codex_files, list_files, list_if, log_action,
+    read_markdown_variant, select_markdown_winner, update_markdown_target, MarkdownVariant,
+    TOOL_CENTRAL,
 };
 use super::{ExecutionMode, LogMode, SyncConflict, SyncItemKind, SyncStats};
 use crate::config::{Config, TOOL_CLAUDE, TOOL_CODEX, TOOL_CURSOR, TOOL_OPENCODE};
@@ -64,7 +64,7 @@ pub(crate) fn sync_commands_with_mode(
             }
         }
         let winner = select_markdown_winner(&variants);
-        if let Some(conflict) = markdown_conflict_for_variants(
+        if let Some(conflict) = conflict_for_variants(
             &name,
             SyncItemKind::Command,
             &variants,

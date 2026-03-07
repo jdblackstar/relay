@@ -1,5 +1,5 @@
 use super::shared::{
-    log_action, markdown_conflict_for_variants, read_markdown_variant, select_markdown_winner,
+    conflict_for_variants, log_action, read_markdown_variant, select_markdown_winner,
     update_markdown_target, MarkdownVariant, TOOL_CENTRAL,
 };
 use super::{ExecutionMode, LogMode, SyncConflict, SyncItemKind, SyncStats};
@@ -84,7 +84,7 @@ pub(crate) fn sync_agents_with_mode(
     }
 
     let winner = select_markdown_winner(&agent_variants);
-    if let Some(conflict) = markdown_conflict_for_variants(
+    if let Some(conflict) = conflict_for_variants(
         "AGENTS.md",
         SyncItemKind::Agent,
         &agent_variants,

@@ -94,15 +94,13 @@ pub(crate) fn sync_skills_with_mode(
             }
         }
         let winner = select_skill_winner(&variants);
-        if let Some(conflict) =
-            conflict_for_variants(
-                &name,
-                SyncItemKind::Skill,
-                &variants,
-                winner.tool,
-                winner.digest.body_hash,
-            )
-        {
+        if let Some(conflict) = conflict_for_variants(
+            &name,
+            SyncItemKind::Skill,
+            &variants,
+            winner.tool,
+            winner.digest.body_hash,
+        ) {
             conflicts.push(conflict);
             log_action(
                 log_mode,
