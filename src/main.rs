@@ -57,6 +57,9 @@ enum Commands {
         /// Explicitly apply changes (default behavior)
         #[arg(short = 'a', long, conflicts_with = "plan")]
         apply: bool,
+        /// Abort without writing if sync detects conflicts
+        #[arg(long)]
+        fail_on_conflict: bool,
     },
     /// Watch folders and sync changes
     Watch {
@@ -174,6 +177,64 @@ fn warn_if_not_initialized() {
     }
 }
 
+#[cfg_attr(test, allow(dead_code))]
+fn run_sync_command(
+    cfg: &config::Config,
+    log_mode: sync::LogMode,
+    quiet: bool,
+    mode: sync::ExecutionMode,
+    fail_on_conflict: bool,
+) -> std::io::Result<sync::SyncOutcome> {
+    run_sync_command_with(
+        log_mode,
+        quiet,
+        mode,
+        fail_on_conflict,
+        |run_log_mode, run_mode| sync::sync_all_with_mode(cfg, run_log_mode, run_mode, "sync"),
+    )
+}
+
+fn run_sync_command_with<F>(
+    log_mode: sync::LogMode,
+    quiet: bool,
+    mode: sync::ExecutionMode,
+    fail_on_conflict: bool,
+    mut run_sync: F,
+) -> std::io::Result<sync::SyncOutcome>
+where
+    F: FnMut(sync::LogMode, sync::ExecutionMode) -> std::io::Result<sync::SyncOutcome>,
+{
+    if !fail_on_conflict {
+        return run_sync(log_mode, mode);
+    }
+
+    let preflight = run_sync(sync::LogMode::Quiet, sync::ExecutionMode::Plan)?;
+    if preflight.has_conflicts() {
+        if !quiet {
+            report::print_conflict_summary(&preflight.conflicts);
+        }
+        return Err(std::io::Error::other(format!(
+            "sync aborted due to {} conflict{}",
+            preflight.conflicts.len(),
+            if preflight.conflicts.len() == 1 {
+                ""
+            } else {
+                "s"
+            }
+        )));
+    }
+
+    if mode == sync::ExecutionMode::Plan {
+        if log_mode == sync::LogMode::Actions {
+            // Re-run the clean plan with action logging so verbose mode still prints details.
+            return run_sync(log_mode, mode);
+        }
+        return Ok(preflight);
+    }
+
+    run_sync(log_mode, mode)
+}
+
 #[cfg(all(not(any(test, coverage)), not(windows)))]
 fn main() -> std::io::Result<()> {
     let Cli {
@@ -194,6 +255,7 @@ fn main() -> std::io::Result<()> {
             confirm_versions,
             plan,
             apply: _apply,
+            fail_on_conflict,
         } => {
             warn_if_not_initialized();
             let cfg = config::Config::load_or_default()?;
@@ -207,20 +269,21 @@ fn main() -> std::io::Result<()> {
                 sync::ExecutionMode::Apply
             };
             logging::debug(&format!(
-                "command=sync mode={mode:?} verbose={verbose} quiet={quiet} confirm_versions={confirm_versions}"
+                "command=sync mode={mode:?} verbose={verbose} quiet={quiet} confirm_versions={confirm_versions} fail_on_conflict={fail_on_conflict}"
             ));
             let log_mode = if verbose {
                 sync::LogMode::Actions
             } else {
                 sync::LogMode::Quiet
             };
-            let outcome = sync::sync_all_with_mode(&cfg, log_mode, mode, "sync")?;
+            let outcome = run_sync_command(&cfg, log_mode, quiet, mode, fail_on_conflict)?;
             logging::debug(&format!(
-                "sync finished commands={} skills={} agents={} rules={} history_event_id={}",
+                "sync finished commands={} skills={} agents={} rules={} conflicts={} history_event_id={}",
                 outcome.report.commands.updated,
                 outcome.report.skills.updated,
                 outcome.report.agents.updated,
                 outcome.report.rules.updated,
+                outcome.conflicts.len(),
                 outcome.history_event_id.as_deref().unwrap_or("none")
             ));
             if !quiet {
@@ -365,9 +428,7 @@ fn main() -> std::io::Result<()> {
                     "at least one tool flag is required (--claude, --codex, --cursor, --opencode)",
                 ));
             }
-            logging::debug(&format!(
-                "command=blacklist path={path} tools={tools:?}"
-            ));
+            logging::debug(&format!("command=blacklist path={path} tools={tools:?}"));
             let mut cfg = config::Config::load_or_default()?;
             blacklist::add_blacklist(&mut cfg, &path, &tools)?;
             println!("blacklisted {path} for {}", tools.join(", "));
@@ -388,9 +449,7 @@ fn main() -> std::io::Result<()> {
                     "at least one tool flag is required (--claude, --codex, --cursor, --opencode)",
                 ));
             }
-            logging::debug(&format!(
-                "command=allow path={path} tools={tools:?}"
-            ));
+            logging::debug(&format!("command=allow path={path} tools={tools:?}"));
             let mut cfg = config::Config::load_or_default()?;
             blacklist::remove_blacklist(&mut cfg, &path, &tools)?;
             println!("allowed {path} for {}", tools.join(", "));
@@ -457,8 +516,87 @@ fn main() {}
 
 #[cfg(test)]
 mod tests {
+    use super::{Cli, Commands};
+    use crate::sync;
+    use clap::Parser;
+
     #[test]
     fn main_stub_runs() {
         super::main();
+    }
+
+    #[test]
+    fn cli_parses_sync_fail_on_conflict() {
+        let cli = Cli::try_parse_from(["relay", "sync", "--fail-on-conflict"]).unwrap();
+        match cli.command {
+            Commands::Sync {
+                fail_on_conflict,
+                plan,
+                ..
+            } => {
+                assert!(fail_on_conflict);
+                assert!(!plan);
+            }
+            _ => panic!("expected sync command"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_sync_plan_fail_on_conflict() {
+        let cli = Cli::try_parse_from(["relay", "sync", "--plan", "--fail-on-conflict"]).unwrap();
+        match cli.command {
+            Commands::Sync {
+                fail_on_conflict,
+                plan,
+                ..
+            } => {
+                assert!(fail_on_conflict);
+                assert!(plan);
+            }
+            _ => panic!("expected sync command"),
+        }
+    }
+
+    #[test]
+    fn cli_rejects_conflicting_sync_flags_with_fail_on_conflict() {
+        let err =
+            match Cli::try_parse_from(["relay", "sync", "--plan", "--apply", "--fail-on-conflict"])
+            {
+                Ok(_) => panic!("expected clap parsing to fail"),
+                Err(err) => err,
+            };
+        assert!(err.to_string().contains("--apply"));
+    }
+
+    #[test]
+    fn fail_on_conflict_plan_verbose_replays_plan_with_actions_logging() {
+        let mut calls = Vec::new();
+        let outcome = super::run_sync_command_with(
+            sync::LogMode::Actions,
+            false,
+            sync::ExecutionMode::Plan,
+            true,
+            |log_mode, mode| {
+                calls.push((log_mode, mode));
+                Ok(sync::SyncOutcome {
+                    report: sync::SyncReport {
+                        commands: sync::SyncStats { updated: 1 },
+                        ..sync::SyncReport::default()
+                    },
+                    conflicts: Vec::new(),
+                    history_event_id: None,
+                })
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            calls,
+            vec![
+                (sync::LogMode::Quiet, sync::ExecutionMode::Plan),
+                (sync::LogMode::Actions, sync::ExecutionMode::Plan),
+            ]
+        );
+        assert_eq!(outcome.report.commands.updated, 1);
     }
 }

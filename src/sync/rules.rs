@@ -1,19 +1,25 @@
 use super::shared::{
-    file_mtime_value, hash_bytes, log_action, tool_order, write_raw_if_changed, CONFLICT_WINDOW_NS,
-    TOOL_CENTRAL,
+    conflict_for_variants, file_mtime_value, hash_bytes, log_action, tool_order,
+    write_raw_if_changed, TOOL_CENTRAL,
 };
-use super::{ExecutionMode, LogMode, SyncStats};
+use super::{ExecutionMode, LogMode, SyncConflict, SyncItemKind, SyncStats};
 use crate::blacklist::CODEX_RULES_BLACKLIST_KEY;
 use crate::config::{Config, TOOL_CODEX};
 use crate::history::HistoryRecorder;
-use std::collections::HashSet;
 use std::fs;
 use std::io;
 
 #[cfg(any(test, coverage))]
 pub(crate) fn sync_rules(cfg: &Config, log_mode: LogMode) -> io::Result<SyncStats> {
     let mut history = None;
-    sync_rules_with_mode(cfg, log_mode, ExecutionMode::Apply, &mut history)
+    let mut conflicts = Vec::new();
+    sync_rules_with_mode(
+        cfg,
+        log_mode,
+        ExecutionMode::Apply,
+        &mut history,
+        &mut conflicts,
+    )
 }
 
 pub(crate) fn sync_rules_with_mode(
@@ -21,9 +27,9 @@ pub(crate) fn sync_rules_with_mode(
     log_mode: LogMode,
     mode: ExecutionMode,
     history: &mut Option<HistoryRecorder>,
+    conflicts: &mut Vec<SyncConflict>,
 ) -> io::Result<SyncStats> {
     let mut stats = SyncStats::default();
-    fs::create_dir_all(&cfg.central_rules_dir)?;
 
     let codex_enabled = cfg.tool_enabled(TOOL_CODEX)
         && cfg
@@ -57,7 +63,14 @@ pub(crate) fn sync_rules_with_mode(
     else {
         return Ok(stats);
     };
-    if should_warn_conflict(&variants) {
+    if let Some(conflict) = conflict_for_variants(
+        "codex/default.rules",
+        SyncItemKind::Rule,
+        &variants,
+        winner.tool,
+        winner.hash,
+    ) {
+        conflicts.push(conflict);
         log_action(
             log_mode,
             &format!(
@@ -98,19 +111,18 @@ struct RuleVariant {
     hash: u64,
 }
 
-fn should_warn_conflict(variants: &[RuleVariant]) -> bool {
-    if variants.len() < 2 {
-        return false;
+impl super::shared::ConflictVariant for RuleVariant {
+    fn tool(&self) -> &'static str {
+        self.tool
     }
-    let mut min = u128::MAX;
-    let mut max = 0u128;
-    let mut hashes = HashSet::new();
-    for variant in variants {
-        min = min.min(variant.mtime);
-        max = max.max(variant.mtime);
-        hashes.insert(variant.hash);
+
+    fn hash(&self) -> u64 {
+        self.hash
     }
-    hashes.len() > 1 && max.saturating_sub(min) <= CONFLICT_WINDOW_NS
+
+    fn mtime(&self) -> u128 {
+        self.mtime
+    }
 }
 
 #[cfg(test)]
@@ -162,6 +174,37 @@ mod tests {
         sync_rules(&cfg, LogMode::Quiet)?;
 
         assert_eq!(fs::read_to_string(&cfg.codex_rules_file)?, "rule(\"new\")");
+        Ok(())
+    }
+
+    #[test]
+    fn sync_rules_collects_conflict_details() -> io::Result<()> {
+        let (_tmp, cfg) = setup()?;
+        let central = cfg.central_rules_dir.join("codex/default.rules");
+        write_plain(&cfg.codex_rules_file, "rule(\"codex\")")?;
+        write_plain(&central, "rule(\"central\")")?;
+        crate::sync::test_support::set_mtime(&cfg.codex_rules_file, 100)?;
+        crate::sync::test_support::set_mtime(&central, 101)?;
+
+        let mut history = None;
+        let mut conflicts = Vec::new();
+        sync_rules_with_mode(
+            &cfg,
+            LogMode::Quiet,
+            ExecutionMode::Plan,
+            &mut history,
+            &mut conflicts,
+        )?;
+
+        assert_eq!(
+            conflicts,
+            vec![SyncConflict {
+                kind: SyncItemKind::Rule,
+                name: "codex/default.rules".to_string(),
+                winner: TOOL_CENTRAL,
+                others: vec![TOOL_CODEX],
+            }]
+        );
         Ok(())
     }
 }

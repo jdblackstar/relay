@@ -1,7 +1,7 @@
-use super::{ExecutionMode, LogMode};
+use super::{ExecutionMode, LogMode, SyncConflict, SyncItemKind};
 use crate::history::HistoryRecorder;
 use std::collections::hash_map::DefaultHasher;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::io;
@@ -29,6 +29,26 @@ pub(crate) struct MarkdownVariant {
     pub(crate) path: PathBuf,
     pub(crate) doc: MarkdownDoc,
     pub(crate) mtime: u128,
+}
+
+pub(crate) trait ConflictVariant {
+    fn tool(&self) -> &'static str;
+    fn hash(&self) -> u64;
+    fn mtime(&self) -> u128;
+}
+
+impl ConflictVariant for MarkdownVariant {
+    fn tool(&self) -> &'static str {
+        self.tool
+    }
+
+    fn hash(&self) -> u64 {
+        self.doc.body_hash
+    }
+
+    fn mtime(&self) -> u128 {
+        self.mtime
+    }
 }
 
 pub(crate) fn list_if(
@@ -113,6 +133,45 @@ pub(crate) fn select_markdown_winner(variants: &[MarkdownVariant]) -> &MarkdownV
         .iter()
         .max_by_key(|variant| (variant.mtime, tool_order(variant.tool)))
         .expect("winner available")
+}
+
+pub(crate) fn conflict_for_variants<T: ConflictVariant>(
+    name: &str,
+    item_kind: SyncItemKind,
+    variants: &[T],
+    winner: &'static str,
+    winner_hash: u64,
+) -> Option<SyncConflict> {
+    if variants.len() < 2 {
+        return None;
+    }
+    let mut min = u128::MAX;
+    let mut max = 0u128;
+    let mut hashes = HashSet::new();
+    for variant in variants {
+        min = min.min(variant.mtime());
+        max = max.max(variant.mtime());
+        hashes.insert(variant.hash());
+    }
+    if hashes.len() < 2 || max.saturating_sub(min) > CONFLICT_WINDOW_NS {
+        return None;
+    }
+
+    let mut others = Vec::new();
+    for variant in variants {
+        if variant.tool() != winner
+            && variant.hash() != winner_hash
+            && !others.contains(&variant.tool())
+        {
+            others.push(variant.tool());
+        }
+    }
+    Some(SyncConflict {
+        kind: item_kind,
+        name: name.to_string(),
+        winner,
+        others,
+    })
 }
 
 #[allow(clippy::too_many_arguments)]

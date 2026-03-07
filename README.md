@@ -61,7 +61,7 @@ Or download a release archive from GitHub and place the `relay` binary on your P
 
 ```sh
 relay [--debug] [--debug-log-file <path>] init
-relay [--debug] [--debug-log-file <path>] sync [-p|--plan|-a|--apply] [-v|--verbose|-q|--quiet] [-c|--confirm-versions]
+relay [--debug] [--debug-log-file <path>] sync [-p|--plan|-a|--apply] [-v|--verbose|-q|--quiet] [--fail-on-conflict] [-c|--confirm-versions]
 relay [--debug] [--debug-log-file <path>] watch [-b|--debounce-ms 300] [-q|--quiet] [-d|--daemon] [-c|--confirm-versions]
 relay [--debug] [--debug-log-file <path>] status
 relay [--debug] [--debug-log-file <path>] daemon install [-b|--debounce-ms 300] [-q|--quiet] [-c|--confirm-versions]
@@ -84,6 +84,7 @@ relay [--debug] [--debug-log-file <path>] rollback [-l|--latest] [-f|--force]
 Init detects installed tool directories and lets you pick which ones to sync.
 Use Space to toggle selections and Enter to confirm.
 `relay sync --plan` previews changes without writing files.
+`relay sync --fail-on-conflict` stops before writing if relay finds competing edits.
 `relay history` lists recorded sync/watch/rollback events.
 Watch-triggered history entries include source context in `origin` when
 available (example: `watch:codex:review.md`).
@@ -94,6 +95,7 @@ available (example: `watch:codex:review.md`).
 
 - `relay sync --plan`: preview writes without changing files.
 - `relay sync --apply`: execute writes and record a history event.
+- `relay sync --fail-on-conflict`: abort before apply writes when sync finds conflicts.
 - `relay watch`: auto-apply writes on file events and record history events.
 - `relay watch --daemon`: run watch as native background service.
 - `relay rollback`: restore paths from a recorded event.
