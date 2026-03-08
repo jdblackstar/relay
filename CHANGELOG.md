@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Sync fail-on-conflict (#10)
 - feat: adding ability to blacklist tools in certain tools (#9)
 - feat: add initialization check for config and warn if not set up (#5)
 - feat: auto-update changelog on merge to main and release (#6)
