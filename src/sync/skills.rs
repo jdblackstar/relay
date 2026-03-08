@@ -1,14 +1,13 @@
 use super::shared::{
-    collect_names, file_mtime_value_from_meta, hash_bytes, list_if, log_action, read_markdown,
-    read_visible_entry, required_frontmatter_hash, select_frontmatter_for_target, tool_order,
-    write_file, CONFLICT_WINDOW_NS, TOOL_CENTRAL,
+    collect_names, conflict_for_variants, file_mtime_value_from_meta, hash_bytes, list_if,
+    log_action, read_markdown, read_visible_entry, required_frontmatter_hash,
+    select_frontmatter_for_target, tool_order, write_file, TOOL_CENTRAL,
 };
-use super::{ExecutionMode, LogMode as SyncLogMode, SyncStats};
+use super::{ExecutionMode, LogMode as SyncLogMode, SyncConflict, SyncItemKind, SyncStats};
 use crate::config::{Config, TOOL_CLAUDE, TOOL_CODEX, TOOL_OPENCODE};
 use crate::history::HistoryRecorder;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::env;
 use std::fs;
 use std::hash::{Hash, Hasher};
@@ -28,10 +27,31 @@ struct SkillVariant {
     digest: DirDigest,
 }
 
+impl super::shared::ConflictVariant for SkillVariant {
+    fn tool(&self) -> &'static str {
+        self.tool
+    }
+
+    fn hash(&self) -> u64 {
+        self.digest.body_hash
+    }
+
+    fn mtime(&self) -> u128 {
+        self.digest.mtime
+    }
+}
+
 #[cfg(any(test, coverage))]
 pub(crate) fn sync_skills(cfg: &Config, log_mode: SyncLogMode) -> io::Result<SyncStats> {
     let mut history = None;
-    sync_skills_with_mode(cfg, log_mode, ExecutionMode::Apply, &mut history)
+    let mut conflicts = Vec::new();
+    sync_skills_with_mode(
+        cfg,
+        log_mode,
+        ExecutionMode::Apply,
+        &mut history,
+        &mut conflicts,
+    )
 }
 
 pub(crate) fn sync_skills_with_mode(
@@ -39,9 +59,9 @@ pub(crate) fn sync_skills_with_mode(
     log_mode: SyncLogMode,
     mode: ExecutionMode,
     history: &mut Option<HistoryRecorder>,
+    conflicts: &mut Vec<SyncConflict>,
 ) -> io::Result<SyncStats> {
     let mut stats = SyncStats::default();
-    fs::create_dir_all(&cfg.central_skills_dir)?;
 
     let claude_enabled = cfg.tool_enabled(TOOL_CLAUDE) && cfg.claude_skills_dir.exists();
     let opencode_enabled = cfg.tool_enabled(TOOL_OPENCODE) && cfg.opencode_skills_dir.exists();
@@ -50,7 +70,11 @@ pub(crate) fn sync_skills_with_mode(
     let claude = list_if(claude_enabled, &cfg.claude_skills_dir, list_skill_dirs)?;
     let opencode = list_if(opencode_enabled, &cfg.opencode_skills_dir, list_skill_dirs)?;
     let codex = list_if(codex_enabled, &cfg.codex_skills_dir, list_skill_dirs)?;
-    let central = list_skill_dirs(&cfg.central_skills_dir)?;
+    let central = if cfg.central_skills_dir.exists() {
+        list_skill_dirs(&cfg.central_skills_dir)?
+    } else {
+        HashMap::new()
+    };
 
     let names = collect_names(&[&claude, &opencode, &codex, &central]);
     for name in names {
@@ -70,7 +94,14 @@ pub(crate) fn sync_skills_with_mode(
             }
         }
         let winner = select_skill_winner(&variants);
-        if should_warn_conflict(&variants) {
+        if let Some(conflict) = conflict_for_variants(
+            &name,
+            SyncItemKind::Skill,
+            &variants,
+            winner.tool,
+            winner.digest.body_hash,
+        ) {
+            conflicts.push(conflict);
             log_action(
                 log_mode,
                 &format!(
@@ -97,21 +128,6 @@ pub(crate) fn sync_skills_with_mode(
     }
 
     Ok(stats)
-}
-
-fn should_warn_conflict(variants: &[SkillVariant]) -> bool {
-    if variants.len() < 2 {
-        return false;
-    }
-    let mut min = u128::MAX;
-    let mut max = 0u128;
-    let mut hashes = HashSet::new();
-    for variant in variants {
-        min = min.min(variant.digest.mtime);
-        max = max.max(variant.digest.mtime);
-        hashes.insert(variant.digest.body_hash);
-    }
-    hashes.len() > 1 && max.saturating_sub(min) <= CONFLICT_WINDOW_NS
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -525,6 +541,36 @@ mod tests {
             &mut history,
         )?;
         assert!(!updated);
+        Ok(())
+    }
+
+    #[test]
+    fn sync_skills_collects_conflict_details() -> io::Result<()> {
+        let (_tmp, cfg) = setup()?;
+        let claude_skill = write_skill(&cfg.claude_skills_dir, "plan", &doc("claude", "Old"))?;
+        let codex_skill = write_skill(&cfg.codex_skills_dir, "plan", &doc("codex", "New"))?;
+        crate::sync::test_support::set_mtime(&claude_skill.join("SKILL.md"), 100)?;
+        crate::sync::test_support::set_mtime(&codex_skill.join("SKILL.md"), 101)?;
+
+        let mut history = None;
+        let mut conflicts = Vec::new();
+        sync_skills_with_mode(
+            &cfg,
+            SyncLogMode::Quiet,
+            ExecutionMode::Plan,
+            &mut history,
+            &mut conflicts,
+        )?;
+
+        assert_eq!(
+            conflicts,
+            vec![SyncConflict {
+                kind: SyncItemKind::Skill,
+                name: "plan".to_string(),
+                winner: TOOL_CODEX,
+                others: vec![TOOL_CLAUDE],
+            }]
+        );
         Ok(())
     }
 

@@ -1,16 +1,17 @@
 use super::shared::{
-    log_action, read_markdown_variant, select_markdown_winner, update_markdown_target,
-    MarkdownVariant, CONFLICT_WINDOW_NS, TOOL_CENTRAL,
+    conflict_for_variants, log_action, read_markdown_variant, select_markdown_winner,
+    update_markdown_target, MarkdownVariant, TOOL_CENTRAL,
 };
-use super::{ExecutionMode, LogMode, SyncStats};
+use super::{ExecutionMode, LogMode, SyncConflict, SyncItemKind, SyncStats};
 use crate::blacklist::{
     CODEX_AGENTS_BLACKLIST_KEY, LEGACY_AGENTS_BLACKLIST_KEY, OPENCODE_AGENTS_BLACKLIST_KEY,
 };
 use crate::config::{Config, TOOL_CODEX, TOOL_OPENCODE};
 use crate::history::HistoryRecorder;
-use std::collections::HashSet;
-use std::fs;
 use std::io;
+
+#[cfg(test)]
+use std::fs;
 
 fn is_agent_target_blacklisted(cfg: &Config, tool: &str) -> bool {
     match tool {
@@ -29,7 +30,14 @@ fn is_agent_target_blacklisted(cfg: &Config, tool: &str) -> bool {
 #[cfg(any(test, coverage))]
 pub(crate) fn sync_agents(cfg: &Config, log_mode: LogMode) -> io::Result<SyncStats> {
     let mut history = None;
-    sync_agents_with_mode(cfg, log_mode, ExecutionMode::Apply, &mut history)
+    let mut conflicts = Vec::new();
+    sync_agents_with_mode(
+        cfg,
+        log_mode,
+        ExecutionMode::Apply,
+        &mut history,
+        &mut conflicts,
+    )
 }
 
 pub(crate) fn sync_agents_with_mode(
@@ -37,9 +45,9 @@ pub(crate) fn sync_agents_with_mode(
     log_mode: LogMode,
     mode: ExecutionMode,
     history: &mut Option<HistoryRecorder>,
+    conflicts: &mut Vec<SyncConflict>,
 ) -> io::Result<SyncStats> {
     let mut stats = SyncStats::default();
-    fs::create_dir_all(&cfg.central_agents_dir)?;
 
     let codex_enabled = cfg.tool_enabled(TOOL_CODEX)
         && cfg
@@ -76,7 +84,14 @@ pub(crate) fn sync_agents_with_mode(
     }
 
     let winner = select_markdown_winner(&agent_variants);
-    if should_warn_conflict(&agent_variants) {
+    if let Some(conflict) = conflict_for_variants(
+        "AGENTS.md",
+        SyncItemKind::Agent,
+        &agent_variants,
+        winner.tool,
+        winner.doc.body_hash,
+    ) {
+        conflicts.push(conflict);
         log_action(
             log_mode,
             &format!(
@@ -112,22 +127,6 @@ pub(crate) fn sync_agents_with_mode(
 
     Ok(stats)
 }
-
-fn should_warn_conflict(variants: &[MarkdownVariant]) -> bool {
-    if variants.len() < 2 {
-        return false;
-    }
-    let mut min = u128::MAX;
-    let mut max = 0u128;
-    let mut hashes = HashSet::new();
-    for variant in variants {
-        min = min.min(variant.mtime);
-        max = max.max(variant.mtime);
-        hashes.insert(variant.doc.body_hash);
-    }
-    hashes.len() > 1 && max.saturating_sub(min) <= CONFLICT_WINDOW_NS
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -198,7 +197,10 @@ mod tests {
         let (_tmp, mut cfg) = setup()?;
 
         write_plain(&cfg.codex_agents_file, &doc("codex", "Codex agent"))?;
-        write_plain(&cfg.opencode_agents_file, &doc("opencode", "OpenCode agent"))?;
+        write_plain(
+            &cfg.opencode_agents_file,
+            &doc("opencode", "OpenCode agent"),
+        )?;
         crate::sync::test_support::set_mtime(&cfg.codex_agents_file, 2_200_000_200)?;
 
         // Legacy blacklist key should still be honored for compatibility.
@@ -271,6 +273,40 @@ mod tests {
         assert!(cfg.codex_agents_file.exists());
         assert!(!cfg.opencode_agents_file.exists());
         assert!(cfg.central_agents_dir.join("codex/AGENTS.md").exists());
+        Ok(())
+    }
+
+    #[test]
+    fn sync_agents_collects_conflict_details() -> io::Result<()> {
+        let (_tmp, cfg) = setup()?;
+
+        write_plain(&cfg.codex_agents_file, &doc("codex", "Codex agent"))?;
+        write_plain(
+            &cfg.opencode_agents_file,
+            &doc("opencode", "OpenCode agent"),
+        )?;
+        crate::sync::test_support::set_mtime(&cfg.codex_agents_file, 100)?;
+        crate::sync::test_support::set_mtime(&cfg.opencode_agents_file, 101)?;
+
+        let mut history = None;
+        let mut conflicts = Vec::new();
+        sync_agents_with_mode(
+            &cfg,
+            LogMode::Quiet,
+            ExecutionMode::Plan,
+            &mut history,
+            &mut conflicts,
+        )?;
+
+        assert_eq!(
+            conflicts,
+            vec![SyncConflict {
+                kind: SyncItemKind::Agent,
+                name: "AGENTS.md".to_string(),
+                winner: TOOL_OPENCODE,
+                others: vec![TOOL_CODEX],
+            }]
+        );
         Ok(())
     }
 }
