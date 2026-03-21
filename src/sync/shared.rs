@@ -37,6 +37,27 @@ pub(crate) trait ConflictVariant {
     fn mtime(&self) -> u128;
 }
 
+enum TargetAction {
+    Create,
+    Update,
+}
+
+impl TargetAction {
+    fn plan_verb(&self) -> &'static str {
+        match self {
+            Self::Create => "would create",
+            Self::Update => "would update",
+        }
+    }
+
+    fn done_verb(&self) -> &'static str {
+        match self {
+            Self::Create => "created",
+            Self::Update => "updated",
+        }
+    }
+}
+
 impl ConflictVariant for MarkdownVariant {
     fn tool(&self) -> &'static str {
         self.tool
@@ -56,11 +77,10 @@ pub(crate) fn list_if(
     dir: &Path,
     list: fn(&Path) -> io::Result<HashMap<String, PathBuf>>,
 ) -> io::Result<HashMap<String, PathBuf>> {
-    if enabled {
-        list(dir)
-    } else {
-        Ok(HashMap::new())
+    if !enabled {
+        return Ok(HashMap::new());
     }
+    list(dir)
 }
 
 pub(crate) fn collect_names(maps: &[&HashMap<String, PathBuf>]) -> BTreeSet<String> {
@@ -188,26 +208,18 @@ pub(crate) fn update_markdown_target(
     let frontmatter =
         select_frontmatter_for_target(source, existing, preserve_frontmatter, log_mode, label);
     let merged = merge_frontmatter(frontmatter.as_deref(), &source.body);
-    if let Some(existing_doc) = existing {
-        if existing_doc.raw == merged {
-            return Ok(false);
-        }
-        if mode == ExecutionMode::Plan {
-            log_action(log_mode, &format!("{label}: would update"));
-            return Ok(true);
-        }
-        write_file(target_path, merged.as_bytes(), mode, history)?;
-        log_action(log_mode, &format!("{label}: updated"));
-        Ok(true)
-    } else {
-        if mode == ExecutionMode::Plan {
-            log_action(log_mode, &format!("{label}: would create"));
-            return Ok(true);
-        }
-        write_file(target_path, merged.as_bytes(), mode, history)?;
-        log_action(log_mode, &format!("{label}: created"));
-        Ok(true)
+    let action = match existing {
+        Some(existing_doc) if existing_doc.raw == merged => return Ok(false),
+        Some(_) => TargetAction::Update,
+        None => TargetAction::Create,
+    };
+    if mode == ExecutionMode::Plan {
+        log_action(log_mode, &format!("{label}: {}", action.plan_verb()));
+        return Ok(true);
     }
+    write_file(target_path, merged.as_bytes(), mode, history)?;
+    log_action(log_mode, &format!("{label}: {}", action.done_verb()));
+    Ok(true)
 }
 
 pub(crate) fn write_file(
@@ -228,11 +240,10 @@ pub(crate) fn write_file(
             ));
         }
     }
-    let before = if let Some(recorder) = history.as_ref() {
-        Some(recorder.capture_path(path)?)
-    } else {
-        None
-    };
+    let before = history
+        .as_ref()
+        .map(|recorder| recorder.capture_path(path))
+        .transpose()?;
     fs::write(path, contents)?;
     if let Some(recorder) = history.as_mut() {
         let after = recorder.snapshot_file_bytes(contents)?;
@@ -684,6 +695,86 @@ mod tests {
         assert!(updated.contains("name: target"));
         assert!(updated.contains("description: target desc"));
         assert!(updated.ends_with("New"));
+        Ok(())
+    }
+
+    #[test]
+    fn update_markdown_target_creates_new_file() -> io::Result<()> {
+        let tmp = TempDir::new()?;
+        let source_path = tmp.path().join("source.md");
+        let target_path = tmp.path().join("created.md");
+        write_plain(&source_path, &doc("source", "Body"))?;
+        let source = read_markdown(&source_path)?;
+        let mut history = None;
+
+        let changed = update_markdown_target(
+            &source,
+            None,
+            &target_path,
+            true,
+            LogMode::Quiet,
+            ExecutionMode::Apply,
+            &mut history,
+            "create",
+        )?;
+
+        assert!(changed);
+        let created = fs::read_to_string(&target_path)?;
+        assert!(created.contains("name: source"));
+        assert!(created.ends_with("Body"));
+        Ok(())
+    }
+
+    #[test]
+    fn update_markdown_target_plan_create_does_not_write_file() -> io::Result<()> {
+        let tmp = TempDir::new()?;
+        let source_path = tmp.path().join("source.md");
+        let target_path = tmp.path().join("planned-create.md");
+        write_plain(&source_path, &doc("source", "Body"))?;
+        let source = read_markdown(&source_path)?;
+        let mut history = None;
+
+        let changed = update_markdown_target(
+            &source,
+            None,
+            &target_path,
+            true,
+            LogMode::Quiet,
+            ExecutionMode::Plan,
+            &mut history,
+            "create",
+        )?;
+
+        assert!(changed);
+        assert!(!target_path.exists());
+        Ok(())
+    }
+
+    #[test]
+    fn update_markdown_target_plan_update_does_not_write_file() -> io::Result<()> {
+        let tmp = TempDir::new()?;
+        let source_path = tmp.path().join("source.md");
+        let target_path = tmp.path().join("target.md");
+        write_plain(&source_path, &doc("source", "New"))?;
+        write_plain(&target_path, &doc("target", "Old"))?;
+        let source = read_markdown(&source_path)?;
+        let existing = read_markdown(&target_path)?;
+        let original = fs::read_to_string(&target_path)?;
+        let mut history = None;
+
+        let changed = update_markdown_target(
+            &source,
+            Some(&existing),
+            &target_path,
+            true,
+            LogMode::Quiet,
+            ExecutionMode::Plan,
+            &mut history,
+            "update",
+        )?;
+
+        assert!(changed);
+        assert_eq!(fs::read_to_string(&target_path)?, original);
         Ok(())
     }
 

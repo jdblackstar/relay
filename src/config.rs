@@ -54,6 +54,17 @@ struct PartialConfig {
     pub codex_agents_file: Option<PathBuf>,
 }
 
+enum ConfigSource {
+    Primary(PathBuf),
+    Legacy(PathBuf),
+    Defaults,
+}
+
+enum LegacyOpencodeDir {
+    Commands(PathBuf),
+    Skills(PathBuf),
+}
+
 impl Config {
     pub fn default_paths() -> io::Result<Self> {
         let home = resolve_home_dir()?.ok_or_else(|| {
@@ -113,79 +124,78 @@ impl Config {
         Ok(config_dir.join("relay/config.toml"))
     }
 
-    pub fn load_or_default() -> io::Result<Self> {
+    fn config_source() -> io::Result<ConfigSource> {
         let path = Self::config_path()?;
-        let relay_home_explicit = env::var("RELAY_HOME")
-            .ok()
-            .map(|value| !value.is_empty())
-            .unwrap_or(false);
-        let read_path = if path.exists() {
-            Some(path)
-        } else if relay_home_explicit {
-            None
-        } else {
-            match Self::legacy_config_path() {
-                Ok(legacy) if legacy.exists() => Some(legacy),
-                _ => None,
-            }
+        if path.exists() {
+            return Ok(ConfigSource::Primary(path));
+        }
+        if relay_home_is_explicit() {
+            return Ok(ConfigSource::Defaults);
+        }
+        match Self::legacy_config_path() {
+            Ok(path) if path.exists() => Ok(ConfigSource::Legacy(path)),
+            _ => Ok(ConfigSource::Defaults),
+        }
+    }
+
+    fn load_from_file(path: &Path) -> io::Result<Self> {
+        let raw = fs::read_to_string(path)?;
+        let cfg: PartialConfig =
+            toml::from_str(&raw).map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+        let cfg = normalize_partial_config_paths(cfg)?;
+        let defaults = Self::default_paths()?;
+        let legacy_opencode_dir = classify_legacy_opencode_dir(cfg.opencode_dir.as_deref());
+        let legacy_command_dir = match &legacy_opencode_dir {
+            Some(LegacyOpencodeDir::Commands(path)) => Some(path.clone()),
+            _ => None,
         };
-        if let Some(path) = read_path {
-            let raw = fs::read_to_string(&path)?;
-            let cfg: PartialConfig = toml::from_str(&raw)
-                .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
-            let cfg = normalize_partial_config_paths(cfg)?;
-            let defaults = Self::default_paths()?;
-            let legacy_command = cfg.opencode_dir.as_ref().and_then(|path| {
-                match path.file_name().and_then(|name| name.to_str()) {
-                    Some("command") | Some("commands") => Some(path.clone()),
-                    _ => None,
-                }
-            });
-            let legacy_skill = cfg.opencode_dir.as_ref().and_then(|path| {
-                match path.file_name().and_then(|name| name.to_str()) {
-                    Some("skill") | Some("skills") => Some(path.clone()),
-                    _ => None,
-                }
-            });
-            Ok(Self {
-                enabled_tools: normalize_tools(
-                    cfg.enabled_tools
-                        .unwrap_or_else(|| defaults.enabled_tools.clone()),
-                ),
-                verified_versions: normalize_versions(
-                    cfg.verified_versions
-                        .unwrap_or_else(|| defaults.verified_versions.clone()),
-                ),
-                blacklist: cfg.blacklist.unwrap_or_default(),
-                central_dir: cfg.central_dir.unwrap_or(defaults.central_dir),
-                central_skills_dir: cfg
-                    .central_skills_dir
-                    .unwrap_or(defaults.central_skills_dir),
-                central_agents_dir: cfg
-                    .central_agents_dir
-                    .unwrap_or(defaults.central_agents_dir),
-                central_rules_dir: cfg.central_rules_dir.unwrap_or(defaults.central_rules_dir),
-                claude_dir: cfg.claude_dir.unwrap_or(defaults.claude_dir),
-                claude_skills_dir: cfg.claude_skills_dir.unwrap_or(defaults.claude_skills_dir),
-                cursor_dir: cfg.cursor_dir.unwrap_or(defaults.cursor_dir),
-                opencode_commands_dir: cfg
-                    .opencode_commands_dir
-                    .or(legacy_command)
-                    .unwrap_or(defaults.opencode_commands_dir),
-                opencode_skills_dir: cfg
-                    .opencode_skills_dir
-                    .or(legacy_skill)
-                    .unwrap_or(defaults.opencode_skills_dir),
-                opencode_agents_file: cfg
-                    .opencode_agents_file
-                    .unwrap_or(defaults.opencode_agents_file),
-                codex_dir: cfg.codex_dir.unwrap_or(defaults.codex_dir),
-                codex_skills_dir: cfg.codex_skills_dir.unwrap_or(defaults.codex_skills_dir),
-                codex_rules_file: cfg.codex_rules_file.unwrap_or(defaults.codex_rules_file),
-                codex_agents_file: cfg.codex_agents_file.unwrap_or(defaults.codex_agents_file),
-            })
-        } else {
-            Self::default_paths()
+        let legacy_skill_dir = match &legacy_opencode_dir {
+            Some(LegacyOpencodeDir::Skills(path)) => Some(path.clone()),
+            _ => None,
+        };
+        Ok(Self {
+            enabled_tools: normalize_tools(
+                cfg.enabled_tools
+                    .unwrap_or_else(|| defaults.enabled_tools.clone()),
+            ),
+            verified_versions: normalize_versions(
+                cfg.verified_versions
+                    .unwrap_or_else(|| defaults.verified_versions.clone()),
+            ),
+            blacklist: cfg.blacklist.unwrap_or_default(),
+            central_dir: cfg.central_dir.unwrap_or(defaults.central_dir),
+            central_skills_dir: cfg
+                .central_skills_dir
+                .unwrap_or(defaults.central_skills_dir),
+            central_agents_dir: cfg
+                .central_agents_dir
+                .unwrap_or(defaults.central_agents_dir),
+            central_rules_dir: cfg.central_rules_dir.unwrap_or(defaults.central_rules_dir),
+            claude_dir: cfg.claude_dir.unwrap_or(defaults.claude_dir),
+            claude_skills_dir: cfg.claude_skills_dir.unwrap_or(defaults.claude_skills_dir),
+            cursor_dir: cfg.cursor_dir.unwrap_or(defaults.cursor_dir),
+            opencode_commands_dir: cfg
+                .opencode_commands_dir
+                .or(legacy_command_dir)
+                .unwrap_or(defaults.opencode_commands_dir),
+            opencode_skills_dir: cfg
+                .opencode_skills_dir
+                .or(legacy_skill_dir)
+                .unwrap_or(defaults.opencode_skills_dir),
+            opencode_agents_file: cfg
+                .opencode_agents_file
+                .unwrap_or(defaults.opencode_agents_file),
+            codex_dir: cfg.codex_dir.unwrap_or(defaults.codex_dir),
+            codex_skills_dir: cfg.codex_skills_dir.unwrap_or(defaults.codex_skills_dir),
+            codex_rules_file: cfg.codex_rules_file.unwrap_or(defaults.codex_rules_file),
+            codex_agents_file: cfg.codex_agents_file.unwrap_or(defaults.codex_agents_file),
+        })
+    }
+
+    pub fn load_or_default() -> io::Result<Self> {
+        match Self::config_source()? {
+            ConfigSource::Primary(path) | ConfigSource::Legacy(path) => Self::load_from_file(&path),
+            ConfigSource::Defaults => Self::default_paths(),
         }
     }
 
@@ -223,20 +233,22 @@ impl Config {
     /// Mirrors the same fallback logic as [`load_or_default`]: when `RELAY_HOME`
     /// is not explicitly set, the legacy config path is also checked.
     pub fn is_initialized() -> io::Result<bool> {
-        if Self::config_path()?.exists() {
-            return Ok(true);
-        }
-        let relay_home_explicit = env::var("RELAY_HOME")
-            .ok()
-            .map(|value| !value.is_empty())
-            .unwrap_or(false);
-        if relay_home_explicit {
-            return Ok(false);
-        }
-        match Self::legacy_config_path() {
-            Ok(legacy) => Ok(legacy.exists()),
-            Err(_) => Ok(false),
-        }
+        Ok(!matches!(Self::config_source()?, ConfigSource::Defaults))
+    }
+}
+
+fn relay_home_is_explicit() -> bool {
+    env::var("RELAY_HOME")
+        .ok()
+        .is_some_and(|value| !value.is_empty())
+}
+
+fn classify_legacy_opencode_dir(path: Option<&Path>) -> Option<LegacyOpencodeDir> {
+    let path = path?;
+    match path.file_name().and_then(|name| name.to_str()) {
+        Some("command") | Some("commands") => Some(LegacyOpencodeDir::Commands(path.to_path_buf())),
+        Some("skill") | Some("skills") => Some(LegacyOpencodeDir::Skills(path.to_path_buf())),
+        _ => None,
     }
 }
 

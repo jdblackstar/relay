@@ -51,6 +51,7 @@ pub(crate) fn sync_commands_with_mode(
 
     let names = collect_names(&[&claude, &cursor, &opencode, &codex, &central]);
     for name in names {
+        let blacklist_key = format!("commands/{name}");
         let mut variants: Vec<MarkdownVariant> = Vec::new();
         for (tool, map) in [
             (TOOL_CENTRAL, &central),
@@ -89,29 +90,31 @@ pub(crate) fn sync_commands_with_mode(
             (TOOL_OPENCODE, opencode_enabled, &cfg.opencode_commands_dir),
             (TOOL_CODEX, codex_enabled, &cfg.codex_dir),
         ] {
-            if enabled
-                && (tool == TOOL_CENTRAL || !cfg.is_blacklisted(&format!("commands/{name}"), tool))
-            {
-                let target_path = base_dir.join(&name);
-                let existing = variants
-                    .iter()
-                    .find(|variant| {
-                        variant.tool == tool && (tool != TOOL_CODEX || variant.path == target_path)
-                    })
-                    .map(|variant| &variant.doc);
-                let label = format!("commands: {}", target_path.display());
-                let updated = update_markdown_target(
-                    source,
-                    existing,
-                    &target_path,
-                    true,
-                    log_mode,
-                    mode,
-                    history,
-                    &label,
-                )?;
-                stats.updated += usize::from(updated);
+            if !enabled {
+                continue;
             }
+            if tool != TOOL_CENTRAL && cfg.is_blacklisted(&blacklist_key, tool) {
+                continue;
+            }
+            let target_path = base_dir.join(&name);
+            let existing = variants
+                .iter()
+                .find(|variant| {
+                    variant.tool == tool && (tool != TOOL_CODEX || variant.path == target_path)
+                })
+                .map(|variant| &variant.doc);
+            let label = format!("commands: {}", target_path.display());
+            let updated = update_markdown_target(
+                source,
+                existing,
+                &target_path,
+                true,
+                log_mode,
+                mode,
+                history,
+                &label,
+            )?;
+            stats.updated += usize::from(updated);
         }
     }
 
