@@ -189,10 +189,11 @@ fn confirm_versions_or_continue(
     cfg: &config::Config,
     confirm_versions: bool,
 ) -> std::io::Result<bool> {
-    if !confirm_versions || !versions::check_versions(cfg) {
-        return Ok(true);
+    let mismatch = versions::check_versions(cfg);
+    if mismatch && confirm_versions {
+        return versions::confirm_version_mismatch();
     }
-    versions::confirm_version_mismatch()
+    Ok(true)
 }
 
 #[cfg_attr(test, allow(dead_code))]
