@@ -18,45 +18,26 @@ use dialoguer::{theme::ColorfulTheme, Confirm, Input, MultiSelect};
 pub fn init() -> io::Result<()> {
     let defaults = Config::default_paths()?;
     let enabled_tools = select_tools(&defaults)?;
-    let tool_selected = |name: &str| enabled_tools.iter().any(|tool| tool == name);
-    let claude_selected = tool_selected(TOOL_CLAUDE);
-    let cursor_selected = tool_selected(TOOL_CURSOR);
-    let codex_selected = tool_selected(TOOL_CODEX);
-    let opencode_selected = tool_selected(TOOL_OPENCODE);
     let central_root = prompt_central_root(&defaults)?;
     let central_dir = central_root.join("commands");
     let central_skills_dir = central_root.join("skills");
     let central_agents_dir = central_root.join("agents");
     let central_rules_dir = central_root.join("rules");
-
-    let claude_base_default = tool_base_default(&defaults.claude_dir);
-    let cursor_base_default = tool_base_default(&defaults.cursor_dir);
-    let codex_base_default = tool_base_default(&defaults.codex_dir);
-    let opencode_base_default = tool_base_default(&defaults.opencode_commands_dir);
-
-    let claude_base = prompt_base_if_missing(
-        claude_selected,
-        tool_detected(&defaults, TOOL_CLAUDE),
-        "Claude base directory",
-        &claude_base_default,
-    )?;
-    let cursor_base = prompt_base_if_missing(
-        cursor_selected,
-        tool_detected(&defaults, TOOL_CURSOR),
-        "Cursor base directory",
-        &cursor_base_default,
-    )?;
-    let codex_base = prompt_base_if_missing(
-        codex_selected,
-        tool_detected(&defaults, TOOL_CODEX),
-        "Codex base directory",
-        &codex_base_default,
-    )?;
-    let opencode_base = prompt_base_if_missing(
-        opencode_selected,
-        tool_detected(&defaults, TOOL_OPENCODE),
+    let prompt_tool_base = |tool: &str, label: &str, path: &Path| {
+        prompt_base_if_missing(
+            enabled_tools.iter().any(|enabled| enabled == tool),
+            tool_detected(&defaults, tool),
+            label,
+            &tool_base_default(path),
+        )
+    };
+    let claude_base = prompt_tool_base(TOOL_CLAUDE, "Claude base directory", &defaults.claude_dir)?;
+    let cursor_base = prompt_tool_base(TOOL_CURSOR, "Cursor base directory", &defaults.cursor_dir)?;
+    let codex_base = prompt_tool_base(TOOL_CODEX, "Codex base directory", &defaults.codex_dir)?;
+    let opencode_base = prompt_tool_base(
+        TOOL_OPENCODE,
         "OpenCode base directory",
-        &opencode_base_default,
+        &defaults.opencode_commands_dir,
     )?;
 
     let claude_dir = derive_from_base(claude_base.as_deref(), &defaults.claude_dir, "commands");
@@ -196,31 +177,32 @@ fn prompt_yes_no(_label: &str) -> io::Result<bool> {
 
 fn ensure_tool_bases(cfg: &Config) -> io::Result<()> {
     if cfg.tool_enabled(TOOL_CLAUDE) {
-        for path in [&cfg.claude_dir, &cfg.claude_skills_dir] {
-            ensure_parent_if_exists(path)?;
-        }
+        ensure_existing_paths(&[&cfg.claude_dir, &cfg.claude_skills_dir])?;
     }
     if cfg.tool_enabled(TOOL_CURSOR) {
-        ensure_parent_if_exists(&cfg.cursor_dir)?;
+        ensure_existing_paths(&[&cfg.cursor_dir])?;
     }
     if cfg.tool_enabled(TOOL_CODEX) {
-        for path in [
+        ensure_existing_paths(&[
             &cfg.codex_dir,
             &cfg.codex_skills_dir,
             &cfg.codex_rules_file,
             &cfg.codex_agents_file,
-        ] {
-            ensure_parent_if_exists(path)?;
-        }
+        ])?;
     }
     if cfg.tool_enabled(TOOL_OPENCODE) {
-        for path in [
+        ensure_existing_paths(&[
             &cfg.opencode_commands_dir,
             &cfg.opencode_skills_dir,
             &cfg.opencode_agents_file,
-        ] {
-            ensure_parent_if_exists(path)?;
-        }
+        ])?;
+    }
+    Ok(())
+}
+
+fn ensure_existing_paths(paths: &[&Path]) -> io::Result<()> {
+    for path in paths {
+        ensure_parent_if_exists(path)?;
     }
     Ok(())
 }
@@ -422,8 +404,10 @@ fn tool_base_default(path: &Path) -> PathBuf {
 }
 
 fn derive_from_base(base: Option<&Path>, default: &Path, suffix: &str) -> PathBuf {
-    base.map(|base| base.join(suffix))
-        .unwrap_or_else(|| default.to_path_buf())
+    if let Some(base) = base {
+        return base.join(suffix);
+    }
+    default.to_path_buf()
 }
 
 fn prompt_base_if_missing(
@@ -432,13 +416,12 @@ fn prompt_base_if_missing(
     label: &str,
     expected: &Path,
 ) -> io::Result<Option<PathBuf>> {
-    if selected && !detected {
-        let prompt = format!("{label} (expected: {})", expected.display());
-        let base = prompt_path(&prompt, Some(expected))?;
-        Ok(Some(base))
-    } else {
-        Ok(None)
+    if !selected || detected {
+        return Ok(None);
     }
+    let prompt = format!("{label} (expected: {})", expected.display());
+    let base = prompt_path(&prompt, Some(expected))?;
+    Ok(Some(base))
 }
 
 fn print_selected_undetected_note(defaults: &Config, selected: &[String]) {

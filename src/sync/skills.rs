@@ -117,11 +117,14 @@ pub(crate) fn sync_skills_with_mode(
             (TOOL_OPENCODE, opencode_enabled, &cfg.opencode_skills_dir),
             (TOOL_CODEX, codex_enabled, &cfg.codex_skills_dir),
         ] {
+            if !enabled {
+                continue;
+            }
             if tool != TOOL_CENTRAL && cfg.is_blacklisted(&format!("skills/{name}"), tool) {
                 continue;
             }
             let updated = sync_skill_for_tool(
-                tool, enabled, base_dir, &name, winner, &variants, log_mode, mode, history,
+                tool, base_dir, &name, winner, &variants, log_mode, mode, history,
             )?;
             stats.updated += usize::from(updated);
         }
@@ -133,7 +136,6 @@ pub(crate) fn sync_skills_with_mode(
 #[allow(clippy::too_many_arguments)]
 fn sync_skill_for_tool(
     tool: &'static str,
-    enabled: bool,
     base_dir: &Path,
     name: &str,
     winner: &SkillVariant,
@@ -142,9 +144,6 @@ fn sync_skill_for_tool(
     mode: ExecutionMode,
     history: &mut Option<HistoryRecorder>,
 ) -> io::Result<bool> {
-    if !enabled {
-        return Ok(false);
-    }
     let target_path = base_dir.join(name);
     let existing = variants
         .iter()
@@ -188,11 +187,10 @@ fn sync_skill_target(
         return Ok(true);
     }
 
-    let before_state = if let Some(recorder) = history.as_ref() {
-        Some(recorder.capture_path(target_path)?)
-    } else {
-        None
-    };
+    let before_state = history
+        .as_ref()
+        .map(|recorder| recorder.capture_path(target_path))
+        .transpose()?;
     target_path.parent().map(fs::create_dir_all).transpose()?;
 
     let temp_path = skill_temp_path(target_path);
@@ -203,7 +201,7 @@ fn sync_skill_target(
 
     let source_skill = source.join("SKILL.md");
     let target_skill = target_path.join("SKILL.md");
-    merge_skill_frontmatter(&source_skill, &target_skill, &temp_path, log_mode, history)?;
+    merge_skill_frontmatter(&source_skill, &target_skill, &temp_path, log_mode)?;
 
     if target_path.exists() {
         fs::remove_dir_all(target_path)?;
@@ -231,7 +229,6 @@ fn merge_skill_frontmatter(
     target_skill: &Path,
     temp_path: &Path,
     log_mode: SyncLogMode,
-    _history: &mut Option<HistoryRecorder>,
 ) -> io::Result<()> {
     if !source_skill.exists() {
         return Ok(());
@@ -582,8 +579,7 @@ mod tests {
         let temp = tmp.path().join("temp");
         fs::create_dir_all(&temp)?;
         write_plain(&target, &doc("target", "Body"))?;
-        let mut history = None;
-        merge_skill_frontmatter(&source, &target, &temp, SyncLogMode::Quiet, &mut history)?;
+        merge_skill_frontmatter(&source, &target, &temp, SyncLogMode::Quiet)?;
         Ok(())
     }
 

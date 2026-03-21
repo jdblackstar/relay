@@ -178,6 +178,54 @@ fn warn_if_not_initialized() {
 }
 
 #[cfg_attr(test, allow(dead_code))]
+fn load_cfg() -> std::io::Result<config::Config> {
+    #[cfg(all(not(any(test, coverage)), not(windows)))]
+    warn_if_not_initialized();
+    config::Config::load_or_default()
+}
+
+#[cfg_attr(test, allow(dead_code))]
+fn confirm_versions_or_continue(
+    cfg: &config::Config,
+    confirm_versions: bool,
+) -> std::io::Result<bool> {
+    if !confirm_versions || !versions::check_versions(cfg) {
+        return Ok(true);
+    }
+    versions::confirm_version_mismatch()
+}
+
+#[cfg_attr(test, allow(dead_code))]
+fn require_tool_flags(tools: Vec<String>) -> std::io::Result<Vec<String>> {
+    if !tools.is_empty() {
+        return Ok(tools);
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::InvalidInput,
+        "at least one tool flag is required (--claude, --codex, --cursor, --opencode)",
+    ))
+}
+
+#[cfg_attr(test, allow(dead_code))]
+fn rollback_target_event_id(
+    store: &history::HistoryStore,
+    event_id: Option<String>,
+    latest: bool,
+) -> std::io::Result<String> {
+    if latest {
+        return store
+            .latest_event_id()?
+            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "history is empty"));
+    }
+    event_id.ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "provide an event id or use --latest",
+        )
+    })
+}
+
+#[cfg_attr(test, allow(dead_code))]
 fn run_sync_command(
     cfg: &config::Config,
     log_mode: sync::LogMode,
@@ -257,10 +305,8 @@ fn main() -> std::io::Result<()> {
             apply: _apply,
             fail_on_conflict,
         } => {
-            warn_if_not_initialized();
-            let cfg = config::Config::load_or_default()?;
-            let mismatch = versions::check_versions(&cfg);
-            if confirm_versions && mismatch && !versions::confirm_version_mismatch()? {
+            let cfg = load_cfg()?;
+            if !confirm_versions_or_continue(&cfg, confirm_versions)? {
                 return Ok(());
             }
             let mode = if plan {
@@ -304,13 +350,11 @@ fn main() -> std::io::Result<()> {
             daemon,
             confirm_versions,
         } => {
-            warn_if_not_initialized();
             logging::debug(&format!(
                 "command=watch debounce_ms={debounce_ms} quiet={quiet} daemon={daemon} confirm_versions={confirm_versions}"
             ));
-            let cfg = config::Config::load_or_default()?;
-            let mismatch = versions::check_versions(&cfg);
-            if confirm_versions && mismatch && !versions::confirm_version_mismatch()? {
+            let cfg = load_cfg()?;
+            if !confirm_versions_or_continue(&cfg, confirm_versions)? {
                 return Ok(());
             }
             if daemon {
@@ -339,14 +383,12 @@ fn main() -> std::io::Result<()> {
             watch::watch(&cfg, debounce_ms, log_mode)
         }
         Commands::Status => {
-            warn_if_not_initialized();
             logging::debug("command=status");
-            let cfg = config::Config::load_or_default()?;
+            let cfg = load_cfg()?;
             print_service_status(&cfg)
         }
         Commands::Daemon { command } => {
-            warn_if_not_initialized();
-            let cfg = config::Config::load_or_default()?;
+            let cfg = load_cfg()?;
             match command {
                 DaemonCommand::Install {
                     debounce_ms,
@@ -356,8 +398,7 @@ fn main() -> std::io::Result<()> {
                     logging::debug(&format!(
                         "command=daemon.install debounce_ms={debounce_ms} quiet={quiet} confirm_versions={confirm_versions}"
                     ));
-                    let mismatch = versions::check_versions(&cfg);
-                    if confirm_versions && mismatch && !versions::confirm_version_mismatch()? {
+                    if !confirm_versions_or_continue(&cfg, confirm_versions)? {
                         return Ok(());
                     }
                     let options = daemon::InstallWatchServiceOptions {
@@ -396,9 +437,8 @@ fn main() -> std::io::Result<()> {
             }
         }
         Commands::History { limit } => {
-            warn_if_not_initialized();
             logging::debug(&format!("command=history limit={limit}"));
-            let cfg = config::Config::load_or_default()?;
+            let cfg = load_cfg()?;
             let store = history::HistoryStore::from_config(&cfg)?;
             let events = store.list_recent(limit)?;
             if events.is_empty() {
@@ -420,16 +460,11 @@ fn main() -> std::io::Result<()> {
             cursor,
             opencode,
         } => {
-            warn_if_not_initialized();
-            let tools = blacklist::collect_tool_flags(claude, codex, cursor, opencode);
-            if tools.is_empty() {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    "at least one tool flag is required (--claude, --codex, --cursor, --opencode)",
-                ));
-            }
+            let tools = require_tool_flags(blacklist::collect_tool_flags(
+                claude, codex, cursor, opencode,
+            ))?;
             logging::debug(&format!("command=blacklist path={path} tools={tools:?}"));
-            let mut cfg = config::Config::load_or_default()?;
+            let mut cfg = load_cfg()?;
             blacklist::add_blacklist(&mut cfg, &path, &tools)?;
             println!("blacklisted {path} for {}", tools.join(", "));
             Ok(())
@@ -441,16 +476,11 @@ fn main() -> std::io::Result<()> {
             cursor,
             opencode,
         } => {
-            warn_if_not_initialized();
-            let tools = blacklist::collect_tool_flags(claude, codex, cursor, opencode);
-            if tools.is_empty() {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    "at least one tool flag is required (--claude, --codex, --cursor, --opencode)",
-                ));
-            }
+            let tools = require_tool_flags(blacklist::collect_tool_flags(
+                claude, codex, cursor, opencode,
+            ))?;
             logging::debug(&format!("command=allow path={path} tools={tools:?}"));
-            let mut cfg = config::Config::load_or_default()?;
+            let mut cfg = load_cfg()?;
             blacklist::remove_blacklist(&mut cfg, &path, &tools)?;
             println!("allowed {path} for {}", tools.join(", "));
             Ok(())
@@ -460,25 +490,13 @@ fn main() -> std::io::Result<()> {
             latest,
             force,
         } => {
-            warn_if_not_initialized();
             logging::debug(&format!(
                 "command=rollback latest={latest} force={force} event_id={}",
                 event_id.as_deref().unwrap_or("none")
             ));
-            let cfg = config::Config::load_or_default()?;
+            let cfg = load_cfg()?;
             let store = history::HistoryStore::from_config(&cfg)?;
-            let target_event_id = if latest {
-                store.latest_event_id()?.ok_or_else(|| {
-                    std::io::Error::new(std::io::ErrorKind::NotFound, "history is empty")
-                })?
-            } else {
-                event_id.ok_or_else(|| {
-                    std::io::Error::new(
-                        std::io::ErrorKind::InvalidInput,
-                        "provide an event id or use --latest",
-                    )
-                })?
-            };
+            let target_event_id = rollback_target_event_id(&store, event_id, latest)?;
             let report = store.rollback(&target_event_id, force)?;
             println!(
                 "rollback: restored {} paths from {}",
@@ -517,8 +535,11 @@ fn main() {}
 #[cfg(test)]
 mod tests {
     use super::{Cli, Commands};
+    use crate::history::{HistoryRecorder, HistoryStore};
     use crate::sync;
+    use crate::sync::test_support::{setup, write_plain};
     use clap::Parser;
+    use std::io;
 
     #[test]
     fn main_stub_runs() {
@@ -598,5 +619,55 @@ mod tests {
             ]
         );
         assert_eq!(outcome.report.commands.updated, 1);
+    }
+
+    #[test]
+    fn require_tool_flags_accepts_non_empty_input() {
+        let tools = super::require_tool_flags(vec!["codex".to_string()]).unwrap();
+        assert_eq!(tools, vec!["codex".to_string()]);
+    }
+
+    #[test]
+    fn require_tool_flags_rejects_empty_input() {
+        let err = super::require_tool_flags(Vec::new()).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn rollback_target_event_id_prefers_explicit_event_id() -> io::Result<()> {
+        let (_tmp, cfg) = setup()?;
+        let store = HistoryStore::from_config(&cfg)?;
+        let event_id =
+            super::rollback_target_event_id(&store, Some("manual-id".to_string()), false)?;
+        assert_eq!(event_id, "manual-id");
+        Ok(())
+    }
+
+    #[test]
+    fn rollback_target_event_id_uses_latest_history_event() -> io::Result<()> {
+        let (_tmp, cfg) = setup()?;
+        let path = cfg.central_dir.join("test.md");
+        write_plain(&path, "before")?;
+
+        let mut recorder = HistoryRecorder::new(&cfg, "test")?;
+        let before = recorder.capture_path(&path)?;
+        write_plain(&path, "after")?;
+        let after = recorder.capture_path(&path)?;
+        recorder.record_change(&path, before, after);
+        let expected = recorder.finish()?.expect("history event id");
+
+        let store = HistoryStore::from_config(&cfg)?;
+        let event_id = super::rollback_target_event_id(&store, None, true)?;
+        assert_eq!(event_id, expected);
+        Ok(())
+    }
+
+    #[test]
+    fn rollback_target_event_id_errors_when_history_is_empty() -> io::Result<()> {
+        let (_tmp, cfg) = setup()?;
+        let store = HistoryStore::from_config(&cfg)?;
+        let err = super::rollback_target_event_id(&store, None, true).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::NotFound);
+        Ok(())
     }
 }
