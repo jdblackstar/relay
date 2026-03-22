@@ -11,6 +11,7 @@ A GitHub Action (`.github/workflows/changelog.yml`) runs on every push to `main`
   - Merge commits: `Merge pull request #123 from ...`
   - Squash-merges: `Some title (#123)`
 - **Fetches the PR title** via `gh pr view` and uses it as the changelog bullet.
+- **Links the generated PR reference** so entries render like `Some change ([#123](https://github.com/owner/repo/pull/123))`.
 - **Categorizes by label.** PR labels map to Keep a Changelog sections:
   - `bug`, `fix`, `bugfix` → `### Fixed`
   - `enhancement`, `refactor`, `breaking` → `### Changed`
@@ -18,6 +19,7 @@ A GitHub Action (`.github/workflows/changelog.yml`) runs on every push to `main`
   - `removal` → `### Removed`
   - `security` → `### Security`
   - Anything else (or no label) → `### Added`
+- **Skips labeled PRs** when you add `skip-changelog`.
 - Commits and pushes the updated `CHANGELOG.md` to `main`.
 
 If a push to `main` has no PR number (e.g. a direct push), the workflow skips.
@@ -56,3 +58,11 @@ Add labels to your PRs before merging to get automatic categorization:
 | `removal` | Removed |
 | `security` | Security |
 | *(anything else)* | Added |
+
+## Skipping entries
+
+Best practice is to use an explicit opt-out label instead of trying to infer "unimportant" changes from file paths alone.
+
+- Add `skip-changelog` for formatting-only changes, CI-only tweaks, internal refactors, or other work that should not appear in user-facing notes.
+- Prefer a human-reviewed label over automatic path rules. A formatting-only PR is easy to label correctly, but path-based rules can hide meaningful behavior changes by accident.
+- If you want more automation later, the safest next step is a labeler workflow that auto-adds `skip-changelog` only when all changed files match low-risk patterns like docs, formatting config, or editor settings.

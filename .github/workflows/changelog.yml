@@ -47,17 +47,23 @@ jobs:
             exit 0
           fi
 
+          TITLE=$(gh pr view "$PR" --json title -q .title 2>/dev/null || echo "$SUBJECT")
+          # Grab labels for categorization and optional changelog skipping.
+          LABELS=$(gh pr view "$PR" --json labels -q '[.labels[].name | ascii_downcase] | join(",")' 2>/dev/null || true)
+          echo "labels=$LABELS" >> "$GITHUB_OUTPUT"
+
+          case ",$LABELS," in
+            *,skip-changelog,*)
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+              ;;
+          esac
+
           echo "skip=false" >> "$GITHUB_OUTPUT"
           echo "number=$PR" >> "$GITHUB_OUTPUT"
-
-          TITLE=$(gh pr view "$PR" --json title -q .title 2>/dev/null || echo "$SUBJECT")
           echo "title<<EOF" >> "$GITHUB_OUTPUT"
           echo "$TITLE" >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"
-
-          # Grab labels for categorization
-          LABELS=$(gh pr view "$PR" --json labels -q '[.labels[].name] | join(",")' 2>/dev/null || true)
-          echo "labels=$LABELS" >> "$GITHUB_OUTPUT"
 
       - name: Insert changelog entry
         if: steps.pr.outputs.skip != 'true'
@@ -65,6 +71,7 @@ jobs:
           PR_TITLE: ${{ steps.pr.outputs.title }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
           PR_LABELS: ${{ steps.pr.outputs.labels }}
+          REPO_SLUG: ${{ github.repository }}
         run: |
           python3 <<'PY'
           import os
@@ -72,6 +79,7 @@ jobs:
 
           title = os.environ["PR_TITLE"].strip()
           number = os.environ["PR_NUMBER"].strip()
+          repo_slug = os.environ["REPO_SLUG"].strip()
           labels = [l.strip().lower() for l in os.environ.get("PR_LABELS", "").split(",") if l.strip()]
 
           if not title:
@@ -98,7 +106,7 @@ jobs:
                   section = label_map[label]
                   break
 
-          entry = f"- {title} (#{number})"
+          entry = f"- {title} ([#{number}](https://github.com/{repo_slug}/pull/{number}))"
 
           path = "CHANGELOG.md"
           with open(path) as f:
