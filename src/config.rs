@@ -5,13 +5,13 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-pub const TOOL_CLAUDE: &str = "claude";
-pub const TOOL_CODEX: &str = "codex";
-pub const TOOL_CURSOR: &str = "cursor";
-pub const TOOL_OPENCODE: &str = "opencode";
+pub(crate) const TOOL_CLAUDE: &str = "claude";
+pub(crate) const TOOL_CODEX: &str = "codex";
+pub(crate) const TOOL_CURSOR: &str = "cursor";
+pub(crate) const TOOL_OPENCODE: &str = "opencode";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Config {
+pub(crate) struct Config {
     pub enabled_tools: Vec<String>,
     pub verified_versions: HashMap<String, String>,
     #[serde(default)]
@@ -66,7 +66,7 @@ enum LegacyOpencodeDir {
 }
 
 impl Config {
-    pub fn default_paths() -> io::Result<Self> {
+    pub(crate) fn default_paths() -> io::Result<Self> {
         let home = resolve_home_dir()?.ok_or_else(|| {
             io::Error::new(io::ErrorKind::NotFound, "could not resolve home directory")
         })?;
@@ -101,7 +101,7 @@ impl Config {
         })
     }
 
-    pub fn config_path() -> io::Result<PathBuf> {
+    pub(crate) fn config_path() -> io::Result<PathBuf> {
         if let Some(home) = resolve_home_dir()? {
             return Ok(resolve_relay_config_root(&home)?.join("config.toml"));
         }
@@ -192,7 +192,7 @@ impl Config {
         })
     }
 
-    pub fn load_or_default() -> io::Result<Self> {
+    pub(crate) fn load_or_default() -> io::Result<Self> {
         match Self::config_source()? {
             ConfigSource::Primary(path) | ConfigSource::Legacy(path) => Self::load_from_file(&path),
             ConfigSource::Defaults => Self::default_paths(),
@@ -200,7 +200,7 @@ impl Config {
     }
 
     #[inline(never)]
-    pub fn save(&self, path: &Path) -> io::Result<()> {
+    pub(crate) fn save(&self, path: &Path) -> io::Result<()> {
         path.parent().map(fs::create_dir_all).transpose()?;
         let serialized = toml::to_string_pretty(self).map_err(serialize_error)?;
         fs::write(path, serialized)
@@ -212,17 +212,17 @@ fn serialize_error(err: toml::ser::Error) -> io::Error {
 }
 
 impl Config {
-    pub fn tool_enabled(&self, tool: &str) -> bool {
+    pub(crate) fn tool_enabled(&self, tool: &str) -> bool {
         self.enabled_tools.iter().any(|name| name == tool)
     }
 
-    pub fn verified_version(&self, tool: &str) -> Option<&str> {
+    pub(crate) fn verified_version(&self, tool: &str) -> Option<&str> {
         self.verified_versions
             .get(&tool.to_ascii_lowercase())
             .map(String::as_str)
     }
 
-    pub fn is_blacklisted(&self, relative_path: &str, tool: &str) -> bool {
+    pub(crate) fn is_blacklisted(&self, relative_path: &str, tool: &str) -> bool {
         self.blacklist
             .get(relative_path)
             .is_some_and(|tools| tools.iter().any(|t| t == tool))
@@ -232,7 +232,7 @@ impl Config {
     ///
     /// Mirrors the same fallback logic as [`load_or_default`]: when `RELAY_HOME`
     /// is not explicitly set, the legacy config path is also checked.
-    pub fn is_initialized() -> io::Result<bool> {
+    pub(crate) fn is_initialized() -> io::Result<bool> {
         Ok(!matches!(Self::config_source()?, ConfigSource::Defaults))
     }
 }
@@ -269,7 +269,7 @@ fn normalize_versions(versions: HashMap<String, String>) -> HashMap<String, Stri
     normalized
 }
 
-pub fn expand_tilde(input: &str) -> io::Result<PathBuf> {
+pub(crate) fn expand_tilde(input: &str) -> io::Result<PathBuf> {
     normalize_path_with_current_context(input)
 }
 

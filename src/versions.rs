@@ -7,7 +7,7 @@ use dialoguer::{theme::ColorfulTheme, Confirm};
 #[cfg(not(any(test, coverage)))]
 use std::process::Command;
 
-pub fn check_versions(cfg: &Config) -> bool {
+pub(crate) fn check_versions(cfg: &Config) -> bool {
     let mut mismatch = false;
     if cfg.tool_enabled(TOOL_CODEX)
         && tool_detected(cfg, TOOL_CODEX)
@@ -136,8 +136,8 @@ fn colorize_version(version: &str, status: VersionStatus) -> String {
     }
 }
 
-#[allow(dead_code)]
-pub fn confirm_version_mismatch() -> std::io::Result<bool> {
+#[cfg_attr(any(test, coverage), allow(dead_code))]
+pub(crate) fn confirm_version_mismatch() -> std::io::Result<bool> {
     #[cfg(not(any(test, coverage)))]
     {
         let theme = ColorfulTheme::default();

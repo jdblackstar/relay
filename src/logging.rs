@@ -13,7 +13,7 @@ struct LoggerConfig {
 static LOGGER: OnceLock<LoggerConfig> = OnceLock::new();
 
 #[cfg_attr(any(test, coverage), allow(dead_code))]
-pub fn init(debug_flag: bool, cli_path: Option<&Path>) {
+pub(crate) fn init(debug_flag: bool, cli_path: Option<&Path>) {
     let env_debug = std::env::var("RELAY_DEBUG")
         .ok()
         .as_deref()
@@ -26,7 +26,7 @@ pub fn init(debug_flag: bool, cli_path: Option<&Path>) {
     debug(&format!("debug logging enabled path={}", path.display()));
 }
 
-pub fn debug(message: &str) {
+pub(crate) fn debug(message: &str) {
     let Some(config) = LOGGER.get() else {
         return;
     };

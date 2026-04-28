@@ -65,7 +65,7 @@ impl EntityState {
 
 #[cfg_attr(any(test, coverage), allow(dead_code))]
 #[derive(Debug, Clone)]
-pub struct HistorySummary {
+pub(crate) struct HistorySummary {
     pub id: String,
     pub timestamp_ms: u64,
     pub origin: String,
@@ -74,19 +74,19 @@ pub struct HistorySummary {
 
 #[cfg_attr(any(test, coverage), allow(dead_code))]
 #[derive(Debug, Clone)]
-pub struct RollbackReport {
+pub(crate) struct RollbackReport {
     pub target_event_id: String,
     pub restored: usize,
     pub rollback_event_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
-pub struct HistoryStore {
+pub(crate) struct HistoryStore {
     root: PathBuf,
 }
 
 impl HistoryStore {
-    pub fn from_config(cfg: &Config) -> io::Result<Self> {
+    pub(crate) fn from_config(cfg: &Config) -> io::Result<Self> {
         let roots = [
             cfg.central_dir.parent(),
             cfg.central_skills_dir.parent(),
@@ -189,7 +189,7 @@ impl HistoryStore {
         fs::read(self.blob_path(blob_id))
     }
 
-    pub fn list_recent(&self, limit: usize) -> io::Result<Vec<HistorySummary>> {
+    pub(crate) fn list_recent(&self, limit: usize) -> io::Result<Vec<HistorySummary>> {
         let mut out: Vec<HistorySummary> = self
             .read_events()?
             .into_iter()
@@ -207,11 +207,11 @@ impl HistoryStore {
     }
 
     #[cfg_attr(any(test, coverage), allow(dead_code))]
-    pub fn latest_event_id(&self) -> io::Result<Option<String>> {
+    pub(crate) fn latest_event_id(&self) -> io::Result<Option<String>> {
         Ok(self.read_events()?.into_iter().last().map(|event| event.id))
     }
 
-    pub fn rollback(&self, event_id: &str, force: bool) -> io::Result<RollbackReport> {
+    pub(crate) fn rollback(&self, event_id: &str, force: bool) -> io::Result<RollbackReport> {
         let events = self.read_events()?;
         let Some(event) = events.into_iter().find(|event| event.id == event_id) else {
             return Err(io::Error::new(
@@ -336,13 +336,13 @@ impl HistoryStore {
     }
 }
 
-pub struct HistoryRecorder {
+pub(crate) struct HistoryRecorder {
     store: HistoryStore,
     event: HistoryEvent,
 }
 
 impl HistoryRecorder {
-    pub fn new(cfg: &Config, origin: &str) -> io::Result<Self> {
+    pub(crate) fn new(cfg: &Config, origin: &str) -> io::Result<Self> {
         let store = HistoryStore::from_config(cfg)?;
         Ok(Self::with_store(
             store,
@@ -383,7 +383,7 @@ impl HistoryRecorder {
         });
     }
 
-    pub fn finish(self) -> io::Result<Option<String>> {
+    pub(crate) fn finish(self) -> io::Result<Option<String>> {
         if self.event.writes.is_empty() {
             return Ok(None);
         }

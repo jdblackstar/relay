@@ -14,7 +14,7 @@ use std::sync::mpsc::{self, RecvTimeoutError};
 #[cfg(not(any(test, coverage)))]
 use std::time::{Duration, Instant};
 
-pub fn build_watch_list(cfg: &Config) -> Vec<(PathBuf, RecursiveMode)> {
+pub(crate) fn build_watch_list(cfg: &Config) -> Vec<(PathBuf, RecursiveMode)> {
     let mut paths = Vec::new();
     for (path, mode) in [
         (&cfg.central_dir, RecursiveMode::NonRecursive),
@@ -125,7 +125,7 @@ fn tool_watch_paths(cfg: &Config, tool: &ToolDefinition) -> Vec<(PathBuf, Recurs
 }
 
 #[cfg(not(any(test, coverage)))]
-pub fn watch(cfg: &Config, debounce_ms: u64, log_mode: LogMode) -> io::Result<()> {
+pub(crate) fn watch(cfg: &Config, debounce_ms: u64, log_mode: LogMode) -> io::Result<()> {
     let (tx, rx) = mpsc::channel();
     let mut watcher = RecommendedWatcher::new(
         move |res| {
@@ -195,7 +195,7 @@ pub fn watch(cfg: &Config, debounce_ms: u64, log_mode: LogMode) -> io::Result<()
 }
 
 #[cfg(any(test, coverage))]
-pub fn watch(cfg: &Config, _debounce_ms: u64, _log_mode: LogMode) -> io::Result<()> {
+pub(crate) fn watch(cfg: &Config, _debounce_ms: u64, _log_mode: LogMode) -> io::Result<()> {
     let _ = build_watch_list(cfg);
     Ok(())
 }

@@ -9,7 +9,12 @@ pub(crate) const CODEX_AGENTS_BLACKLIST_KEY: &str = "agents/codex/AGENTS.md";
 pub(crate) const OPENCODE_AGENTS_BLACKLIST_KEY: &str = "agents/opencode/AGENTS.md";
 pub(crate) const CODEX_RULES_BLACKLIST_KEY: &str = "rules/codex/default.rules";
 
-pub fn collect_tool_flags(claude: bool, codex: bool, cursor: bool, opencode: bool) -> Vec<String> {
+pub(crate) fn collect_tool_flags(
+    claude: bool,
+    codex: bool,
+    cursor: bool,
+    opencode: bool,
+) -> Vec<String> {
     let mut tools = Vec::new();
     if claude {
         tools.push(TOOL_CLAUDE.to_string());
@@ -27,7 +32,7 @@ pub fn collect_tool_flags(claude: bool, codex: bool, cursor: bool, opencode: boo
 }
 
 #[cfg_attr(any(test, coverage), allow(dead_code))]
-pub fn add_blacklist(cfg: &mut Config, path: &str, tools: &[String]) -> io::Result<()> {
+pub(crate) fn add_blacklist(cfg: &mut Config, path: &str, tools: &[String]) -> io::Result<()> {
     validate_blacklist_path(path)?;
     let entry = cfg.blacklist.entry(path.to_string()).or_default();
     for tool in tools {
@@ -41,7 +46,7 @@ pub fn add_blacklist(cfg: &mut Config, path: &str, tools: &[String]) -> io::Resu
 }
 
 #[cfg_attr(any(test, coverage), allow(dead_code))]
-pub fn remove_blacklist(cfg: &mut Config, path: &str, tools: &[String]) -> io::Result<()> {
+pub(crate) fn remove_blacklist(cfg: &mut Config, path: &str, tools: &[String]) -> io::Result<()> {
     if let Some(entry) = cfg.blacklist.get_mut(path) {
         entry.retain(|t| !tools.iter().any(|tool| tool == t));
         if entry.is_empty() {
@@ -146,7 +151,7 @@ fn retroactive_delete(cfg: &Config, path: &str, tools: &[String]) -> io::Result<
     Ok(())
 }
 
-pub fn resolve_tool_paths(cfg: &Config, relative_path: &str, tool: &str) -> Vec<PathBuf> {
+pub(crate) fn resolve_tool_paths(cfg: &Config, relative_path: &str, tool: &str) -> Vec<PathBuf> {
     let mut paths = Vec::new();
 
     if let Some(raw_suffix) = relative_path.strip_prefix("commands/") {
