@@ -15,7 +15,7 @@ use crate::config::expand_tilde;
 #[cfg(not(test))]
 use dialoguer::{theme::ColorfulTheme, Confirm, Input, MultiSelect};
 
-pub fn init() -> io::Result<()> {
+pub(crate) fn init() -> io::Result<()> {
     let defaults = Config::default_paths()?;
     let enabled_tools = select_tools(&defaults)?;
     let central_root = prompt_central_root(&defaults)?;

@@ -12,19 +12,19 @@ mod skills;
 pub(crate) mod test_support;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LogMode {
+pub(crate) enum LogMode {
     Quiet,
     Actions,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ExecutionMode {
+pub(crate) enum ExecutionMode {
     Apply,
     Plan,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SyncItemKind {
+pub(crate) enum SyncItemKind {
     Command,
     Skill,
     Agent,
@@ -32,7 +32,7 @@ pub enum SyncItemKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SyncConflict {
+pub(crate) struct SyncConflict {
     pub kind: SyncItemKind,
     pub name: String,
     pub winner: &'static str,
@@ -40,18 +40,18 @@ pub struct SyncConflict {
 }
 
 #[derive(Debug, Default, Clone, Copy)]
-pub struct SyncStats {
+pub(crate) struct SyncStats {
     pub updated: usize,
 }
 
 impl SyncStats {
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.updated == 0
     }
 }
 
 #[derive(Debug, Default, Clone, Copy)]
-pub struct SyncReport {
+pub(crate) struct SyncReport {
     pub commands: SyncStats,
     pub skills: SyncStats,
     pub agents: SyncStats,
@@ -59,7 +59,7 @@ pub struct SyncReport {
 }
 
 impl SyncReport {
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.commands.is_empty()
             && self.skills.is_empty()
             && self.agents.is_empty()
@@ -69,23 +69,23 @@ impl SyncReport {
 
 #[cfg_attr(any(test, coverage), allow(dead_code))]
 #[derive(Debug, Clone)]
-pub struct SyncOutcome {
+pub(crate) struct SyncOutcome {
     pub report: SyncReport,
     pub conflicts: Vec<SyncConflict>,
     pub history_event_id: Option<String>,
 }
 
 impl SyncOutcome {
-    pub fn has_conflicts(&self) -> bool {
+    pub(crate) fn has_conflicts(&self) -> bool {
         !self.conflicts.is_empty()
     }
 }
 
-pub fn sync_all(cfg: &Config, log_mode: LogMode) -> io::Result<SyncReport> {
+pub(crate) fn sync_all(cfg: &Config, log_mode: LogMode) -> io::Result<SyncReport> {
     Ok(sync_all_with_mode(cfg, log_mode, ExecutionMode::Apply, "sync")?.report)
 }
 
-pub fn sync_all_with_mode(
+pub(crate) fn sync_all_with_mode(
     cfg: &Config,
     log_mode: LogMode,
     mode: ExecutionMode,

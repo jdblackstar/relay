@@ -1,6 +1,6 @@
 use crate::sync::{SyncConflict, SyncItemKind, SyncReport};
 
-pub fn print_sync_summary(report: &SyncReport) {
+pub(crate) fn print_sync_summary(report: &SyncReport) {
     if report.is_empty() {
         println!("sync: no changes");
         return;
@@ -11,7 +11,7 @@ pub fn print_sync_summary(report: &SyncReport) {
     );
 }
 
-pub fn print_plan_summary(report: &SyncReport) {
+pub(crate) fn print_plan_summary(report: &SyncReport) {
     if report.is_empty() {
         println!("plan: no changes");
         return;
@@ -22,7 +22,7 @@ pub fn print_plan_summary(report: &SyncReport) {
     );
 }
 
-pub fn print_conflict_summary(conflicts: &[SyncConflict]) {
+pub(crate) fn print_conflict_summary(conflicts: &[SyncConflict]) {
     println!("conflicts: {} detected", conflicts.len());
     for conflict in conflicts {
         let kind = match conflict.kind {

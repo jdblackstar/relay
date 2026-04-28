@@ -23,13 +23,13 @@ const SERVICE_ENV_KEYS: [&str; 8] = [
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ServiceManager {
+pub(crate) enum ServiceManager {
     Launchd,
     SystemdUser,
 }
 
 impl ServiceManager {
-    pub fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Launchd => "launchd",
             Self::SystemdUser => "systemd-user",
@@ -38,14 +38,14 @@ impl ServiceManager {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ServiceState {
+pub(crate) enum ServiceState {
     NotInstalled,
     Stopped,
     Running,
 }
 
 impl ServiceState {
-    pub fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::NotInstalled => "not-installed",
             Self::Stopped => "stopped",
@@ -55,13 +55,13 @@ impl ServiceState {
 }
 
 #[derive(Debug, Clone)]
-pub struct ServicePaths {
+pub(crate) struct ServicePaths {
     pub service_file: PathBuf,
     pub log_file: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
-pub struct ServiceStatus {
+pub(crate) struct ServiceStatus {
     pub manager: ServiceManager,
     pub service_name: &'static str,
     pub state: ServiceState,
@@ -70,14 +70,17 @@ pub struct ServiceStatus {
 }
 
 #[derive(Debug, Clone)]
-pub struct InstallWatchServiceOptions {
+pub(crate) struct InstallWatchServiceOptions {
     pub debounce_ms: u64,
     pub quiet: bool,
     pub debug: bool,
     pub debug_log_file: Option<PathBuf>,
 }
 
-pub fn install_watch_service(cfg: &Config, options: &InstallWatchServiceOptions) -> io::Result<()> {
+pub(crate) fn install_watch_service(
+    cfg: &Config,
+    options: &InstallWatchServiceOptions,
+) -> io::Result<()> {
     let manager = service_manager()?;
     let paths = service_paths(cfg, manager)?;
     let relay_bin = env::current_exe()?;
@@ -111,7 +114,7 @@ pub fn install_watch_service(cfg: &Config, options: &InstallWatchServiceOptions)
     Ok(())
 }
 
-pub fn start_watch_service(cfg: &Config) -> io::Result<()> {
+pub(crate) fn start_watch_service(cfg: &Config) -> io::Result<()> {
     let manager = service_manager()?;
     let paths = service_paths(cfg, manager)?;
     if !paths.service_file.exists() {
@@ -141,7 +144,7 @@ pub fn start_watch_service(cfg: &Config) -> io::Result<()> {
     }
 }
 
-pub fn stop_watch_service(cfg: &Config) -> io::Result<()> {
+pub(crate) fn stop_watch_service(cfg: &Config) -> io::Result<()> {
     let manager = service_manager()?;
     let paths = service_paths(cfg, manager)?;
     if !paths.service_file.exists() {
@@ -168,7 +171,7 @@ pub fn stop_watch_service(cfg: &Config) -> io::Result<()> {
     }
 }
 
-pub fn restart_watch_service(cfg: &Config) -> io::Result<()> {
+pub(crate) fn restart_watch_service(cfg: &Config) -> io::Result<()> {
     let status = watch_service_status(cfg)?;
     if status.state == ServiceState::Running {
         stop_watch_service(cfg)?;
@@ -176,7 +179,7 @@ pub fn restart_watch_service(cfg: &Config) -> io::Result<()> {
     start_watch_service(cfg)
 }
 
-pub fn uninstall_watch_service(cfg: &Config) -> io::Result<()> {
+pub(crate) fn uninstall_watch_service(cfg: &Config) -> io::Result<()> {
     let manager = service_manager()?;
     let paths = service_paths(cfg, manager)?;
 
@@ -190,7 +193,7 @@ pub fn uninstall_watch_service(cfg: &Config) -> io::Result<()> {
     Ok(())
 }
 
-pub fn watch_service_status(cfg: &Config) -> io::Result<ServiceStatus> {
+pub(crate) fn watch_service_status(cfg: &Config) -> io::Result<ServiceStatus> {
     let manager = service_manager()?;
     let paths = service_paths(cfg, manager)?;
     let state = match manager {

@@ -1,7 +1,7 @@
 use crate::config::{Config, TOOL_CLAUDE, TOOL_CODEX, TOOL_CURSOR, TOOL_OPENCODE};
 use std::path::PathBuf;
 
-pub struct ToolDefinition {
+pub(crate) struct ToolDefinition {
     pub id: &'static str,
     pub label: &'static str,
     pub commands_dir: Option<fn(&Config) -> &PathBuf>,
@@ -50,7 +50,7 @@ fn opencode_agents(cfg: &Config) -> &PathBuf {
     &cfg.opencode_agents_file
 }
 
-pub const TOOL_DEFINITIONS: [ToolDefinition; 4] = [
+pub(crate) const TOOL_DEFINITIONS: [ToolDefinition; 4] = [
     ToolDefinition {
         id: TOOL_CLAUDE,
         label: "Claude Code",
@@ -103,7 +103,7 @@ fn tool_paths<'a>(cfg: &'a Config, tool: &str) -> Option<Vec<&'a PathBuf>> {
     Some(paths)
 }
 
-pub fn tool_expected_paths(cfg: &Config, tool: &str) -> Option<String> {
+pub(crate) fn tool_expected_paths(cfg: &Config, tool: &str) -> Option<String> {
     let definition = TOOL_DEFINITIONS.iter().find(|spec| spec.id == tool)?;
     let paths = tool_paths(cfg, tool)?;
     let path_list = paths
@@ -117,7 +117,7 @@ pub fn tool_expected_paths(cfg: &Config, tool: &str) -> Option<String> {
     Some(format!("{} (expected at {})", definition.label, path_list))
 }
 
-pub fn tool_detected(cfg: &Config, tool: &str) -> bool {
+pub(crate) fn tool_detected(cfg: &Config, tool: &str) -> bool {
     tool_paths(cfg, tool)
         .map(|paths| paths.iter().any(|path| path.exists()))
         .unwrap_or(false)
