@@ -4,6 +4,7 @@ mod daemon;
 mod history;
 mod init;
 mod logging;
+mod process_lock;
 mod report;
 mod sync;
 mod tools;
@@ -284,6 +285,20 @@ where
     run_sync(log_mode, mode)
 }
 
+#[cfg_attr(test, allow(dead_code))]
+fn sync_requires_process_lock(mode: sync::ExecutionMode) -> bool {
+    mode == sync::ExecutionMode::Apply
+}
+
+#[cfg_attr(test, allow(dead_code))]
+fn with_process_lock<T, F>(operation: &str, run: F) -> std::io::Result<T>
+where
+    F: FnOnce() -> std::io::Result<T>,
+{
+    let _lock = process_lock::ProcessLock::acquire(operation)?;
+    run()
+}
+
 #[cfg(all(not(any(test, coverage)), not(windows)))]
 fn main() -> std::io::Result<()> {
     let Cli {
@@ -323,7 +338,13 @@ fn main() -> std::io::Result<()> {
             } else {
                 sync::LogMode::Quiet
             };
-            let outcome = run_sync_command(&cfg, log_mode, quiet, mode, fail_on_conflict)?;
+            let outcome = if sync_requires_process_lock(mode) {
+                with_process_lock("sync", || {
+                    run_sync_command(&cfg, log_mode, quiet, mode, fail_on_conflict)
+                })?
+            } else {
+                run_sync_command(&cfg, log_mode, quiet, mode, fail_on_conflict)?
+            };
             logging::debug(&format!(
                 "sync finished commands={} skills={} agents={} rules={} conflicts={} history_event_id={}",
                 outcome.report.commands.updated,
@@ -375,12 +396,9 @@ fn main() -> std::io::Result<()> {
             } else {
                 sync::LogMode::Actions
             };
-            let _ = sync::sync_all_with_mode(
-                &cfg,
-                log_mode,
-                sync::ExecutionMode::Apply,
-                "watch-start",
-            )?;
+            let _ = with_process_lock("watch-start", || {
+                sync::sync_all_with_mode(&cfg, log_mode, sync::ExecutionMode::Apply, "watch-start")
+            })?;
             watch::watch(&cfg, debounce_ms, log_mode)
         }
         Commands::Status => {
@@ -465,8 +483,10 @@ fn main() -> std::io::Result<()> {
                 claude, codex, cursor, opencode,
             ))?;
             logging::debug(&format!("command=blacklist path={path} tools={tools:?}"));
-            let mut cfg = load_cfg()?;
-            blacklist::add_blacklist(&mut cfg, &path, &tools)?;
+            with_process_lock("blacklist", || {
+                let mut cfg = load_cfg()?;
+                blacklist::add_blacklist(&mut cfg, &path, &tools)
+            })?;
             println!("blacklisted {path} for {}", tools.join(", "));
             Ok(())
         }
@@ -481,8 +501,10 @@ fn main() -> std::io::Result<()> {
                 claude, codex, cursor, opencode,
             ))?;
             logging::debug(&format!("command=allow path={path} tools={tools:?}"));
-            let mut cfg = load_cfg()?;
-            blacklist::remove_blacklist(&mut cfg, &path, &tools)?;
+            with_process_lock("allow", || {
+                let mut cfg = load_cfg()?;
+                blacklist::remove_blacklist(&mut cfg, &path, &tools)
+            })?;
             println!("allowed {path} for {}", tools.join(", "));
             Ok(())
         }
@@ -496,9 +518,11 @@ fn main() -> std::io::Result<()> {
                 event_id.as_deref().unwrap_or("none")
             ));
             let cfg = load_cfg()?;
-            let store = history::HistoryStore::from_config(&cfg)?;
-            let target_event_id = rollback_target_event_id(&store, event_id, latest)?;
-            let report = store.rollback(&target_event_id, force)?;
+            let report = with_process_lock("rollback", || {
+                let store = history::HistoryStore::from_config(&cfg)?;
+                let target_event_id = rollback_target_event_id(&store, event_id, latest)?;
+                store.rollback(&target_event_id, force)
+            })?;
             println!(
                 "rollback: restored {} paths from {}",
                 report.restored, report.target_event_id
@@ -620,6 +644,16 @@ mod tests {
             ]
         );
         assert_eq!(outcome.report.commands.updated, 1);
+    }
+
+    #[test]
+    fn only_apply_sync_requires_process_lock() {
+        assert!(super::sync_requires_process_lock(
+            sync::ExecutionMode::Apply
+        ));
+        assert!(!super::sync_requires_process_lock(
+            sync::ExecutionMode::Plan
+        ));
     }
 
     #[test]

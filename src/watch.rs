@@ -6,6 +6,8 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 #[cfg(not(any(test, coverage)))]
+use crate::process_lock::ProcessLock;
+#[cfg(not(any(test, coverage)))]
 use crate::sync::{self, ExecutionMode};
 #[cfg(not(any(test, coverage)))]
 use notify::{Config as NotifyConfig, RecommendedWatcher, Watcher};
@@ -190,6 +192,7 @@ pub(crate) fn watch(cfg: &Config, debounce_ms: u64, log_mode: LogMode) -> io::Re
         }
         let origin = watch_origin(cfg, &changed_paths);
         crate::logging::debug(&format!("watch applying sync origin={origin}"));
+        let _lock = ProcessLock::acquire(&origin)?;
         let _ = sync::sync_all_with_mode(cfg, log_mode, ExecutionMode::Apply, &origin)?;
     }
 }
