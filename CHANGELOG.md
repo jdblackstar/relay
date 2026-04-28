@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Tighten internal visibility ([#13](https://github.com/jdblackstar/relay/pull/13))
 - refactor: simplify config and sync control flow (#11)
 
 ## [0.2.2] - 2026-03-21
