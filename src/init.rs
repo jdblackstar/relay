@@ -95,11 +95,15 @@ pub fn init() -> io::Result<()> {
         codex_rules_file,
         codex_agents_file,
     };
-    let config_path = Config::config_path()?;
-    cfg.save(&config_path)?;
-    ensure_tool_bases(&cfg)?;
-    maybe_setup_dotfiles_backup(&cfg)?;
-    let report = sync::sync_all(&cfg, LogMode::Quiet)?;
+    let (config_path, report) = {
+        let _lock = crate::process_lock::ProcessLock::acquire("init")?;
+        let config_path = Config::config_path()?;
+        cfg.save(&config_path)?;
+        ensure_tool_bases(&cfg)?;
+        maybe_setup_dotfiles_backup(&cfg)?;
+        let report = sync::sync_all(&cfg, LogMode::Quiet)?;
+        (config_path, report)
+    };
     println!("Saved config to {}", config_path.display());
     if !report.is_empty() {
         print_sync_summary(&report);

@@ -114,6 +114,21 @@ impl Config {
         Ok(config_dir.join("relay/config.toml"))
     }
 
+    pub fn runtime_dir() -> io::Result<PathBuf> {
+        let config_path = Self::config_path()?;
+        let config_root = config_path.parent().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "config path has no parent directory",
+            )
+        })?;
+        Ok(config_root.join("runtime"))
+    }
+
+    pub fn lock_path() -> io::Result<PathBuf> {
+        Ok(Self::runtime_dir()?.join("relay.lock"))
+    }
+
     fn legacy_config_path() -> io::Result<PathBuf> {
         let config_dir = resolve_config_dir_checked()?.ok_or_else(|| {
             io::Error::new(
@@ -825,6 +840,24 @@ mod tests {
         assert_eq!(err.kind(), io::ErrorKind::NotFound);
         set_env("RELAY_NO_HOME", None);
         set_env("RELAY_NO_CONFIG", None);
+    }
+
+    #[test]
+    fn runtime_and_lock_paths_live_next_to_config() -> io::Result<()> {
+        let _lock = env_lock();
+        let tmp = TempDir::new()?;
+        let home = tmp.path().join("home");
+        fs::create_dir_all(&home)?;
+        set_env("RELAY_HOME", Some(home.to_string_lossy().as_ref()));
+
+        assert_eq!(Config::runtime_dir()?, home.join(".config/relay/runtime"));
+        assert_eq!(
+            Config::lock_path()?,
+            home.join(".config/relay/runtime/relay.lock")
+        );
+
+        set_env("RELAY_HOME", None);
+        Ok(())
     }
 
     #[test]
