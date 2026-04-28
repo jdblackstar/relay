@@ -1,3 +1,4 @@
+mod atomic;
 mod blacklist;
 mod config;
 mod daemon;

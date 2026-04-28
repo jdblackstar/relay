@@ -1,4 +1,5 @@
 use super::{ExecutionMode, LogMode, SyncConflict, SyncItemKind};
+use crate::atomic::write_atomic;
 use crate::history::HistoryRecorder;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -244,7 +245,7 @@ pub(crate) fn write_file(
         .as_ref()
         .map(|recorder| recorder.capture_path(path))
         .transpose()?;
-    fs::write(path, contents)?;
+    write_atomic(path, contents)?;
     if let Some(recorder) = history.as_mut() {
         let after = recorder.snapshot_file_bytes(contents)?;
         recorder.record_change(
@@ -548,6 +549,17 @@ mod tests {
     use crate::sync::test_support::{doc, write_plain};
     use tempfile::TempDir;
 
+    fn assert_no_relay_temp_files(dir: &Path) -> io::Result<()> {
+        if !dir.exists() {
+            return Ok(());
+        }
+        for entry in fs::read_dir(dir)? {
+            let name = entry?.file_name().to_string_lossy().to_string();
+            assert!(!name.contains(".relay.tmp"), "left temp file: {name}");
+        }
+        Ok(())
+    }
+
     #[test]
     fn merge_and_split_frontmatter() {
         let merged = merge_frontmatter(Some("---\nname: x\n---\n"), "Body");
@@ -800,6 +812,60 @@ mod tests {
         let mut history = None;
         let err = write_file(&dir, b"fail", ExecutionMode::Apply, &mut history).unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::AlreadyExists);
+        assert_no_relay_temp_files(tmp.path())?;
+        Ok(())
+    }
+
+    #[test]
+    fn write_file_creates_and_updates_with_atomic_temp_cleanup() -> io::Result<()> {
+        let tmp = TempDir::new()?;
+        let path = tmp.path().join("nested/file.md");
+        let parent = path.parent().expect("path has parent");
+        let stale_temp = parent.join(".file.md.relay.tmp");
+        fs::create_dir_all(parent)?;
+        write_plain(&stale_temp, "stale")?;
+
+        let mut history = None;
+        write_file(&path, b"created", ExecutionMode::Apply, &mut history)?;
+        assert_eq!(fs::read_to_string(&path)?, "created");
+        assert!(!stale_temp.exists());
+        assert_no_relay_temp_files(parent)?;
+
+        write_file(&path, b"updated", ExecutionMode::Apply, &mut history)?;
+        assert_eq!(fs::read_to_string(&path)?, "updated");
+        assert_no_relay_temp_files(parent)?;
+        Ok(())
+    }
+
+    #[test]
+    fn write_file_plan_does_not_create_parent_or_temp() -> io::Result<()> {
+        let tmp = TempDir::new()?;
+        let path = tmp.path().join("missing/file.md");
+        let parent = path.parent().expect("path has parent");
+        let mut history = None;
+
+        write_file(&path, b"planned", ExecutionMode::Plan, &mut history)?;
+
+        assert!(!parent.exists());
+        assert_no_relay_temp_files(tmp.path())?;
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_file_preserves_existing_permissions() -> io::Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = TempDir::new()?;
+        let path = tmp.path().join("file.md");
+        write_plain(&path, "old")?;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))?;
+
+        let mut history = None;
+        write_file(&path, b"new", ExecutionMode::Apply, &mut history)?;
+
+        let mode = fs::metadata(&path)?.permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
         Ok(())
     }
 
@@ -811,6 +877,21 @@ mod tests {
         let mut history = None;
         let changed = write_raw_if_changed(&path, b"same", ExecutionMode::Apply, &mut history)?;
         assert!(!changed);
+        Ok(())
+    }
+
+    #[test]
+    fn write_raw_if_changed_plan_does_not_write_temp_files() -> io::Result<()> {
+        let tmp = TempDir::new()?;
+        let path = tmp.path().join("file.md");
+        write_plain(&path, "old")?;
+        let mut history = None;
+
+        let changed = write_raw_if_changed(&path, b"new", ExecutionMode::Plan, &mut history)?;
+
+        assert!(changed);
+        assert_eq!(fs::read_to_string(&path)?, "old");
+        assert_no_relay_temp_files(tmp.path())?;
         Ok(())
     }
 
