@@ -1,5 +1,6 @@
 #![cfg_attr(any(test, coverage), allow(dead_code))]
 
+use crate::atomic::write_atomic;
 use crate::config::Config;
 use std::collections::BTreeMap;
 use std::env;
@@ -419,12 +420,6 @@ fn escape_systemd_environment(value: &str) -> String {
         .replace('%', "%%")
         .replace('\\', "\\\\")
         .replace('"', "\\\"")
-}
-
-fn write_atomic(path: &Path, body: &[u8]) -> io::Result<()> {
-    let tmp = path.with_extension("tmp");
-    fs::write(&tmp, body)?;
-    fs::rename(tmp, path)
 }
 
 fn systemd_daemon_reload() -> io::Result<()> {
