@@ -58,7 +58,22 @@ fn atomic_target_path(path: &Path) -> io::Result<PathBuf> {
         return Ok(path.to_path_buf());
     }
 
-    let target_metadata = fs::metadata(path)?;
+    let target_metadata = match fs::metadata(path) {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {
+            // Dangling symlink: `metadata` follows the link and fails; resolve the
+            // link text so the write can create the target (matching `fs::write`).
+            let link = fs::read_link(path)?;
+            return Ok(if link.is_absolute() {
+                link
+            } else {
+                path.parent()
+                    .map(|parent| parent.join(&link))
+                    .unwrap_or(link)
+            });
+        }
+        Err(err) => return Err(err),
+    };
     if target_metadata.is_dir() {
         return Err(io::Error::new(
             io::ErrorKind::AlreadyExists,
