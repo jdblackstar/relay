@@ -9,11 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+
+## [0.2.3] - 2026-04-29
+
+### Added
+
 - fix: make sync file writes atomic ([#16](https://github.com/jdblackstar/relay/pull/16))
 - Serialize mutating relay operations ([#14](https://github.com/jdblackstar/relay/pull/14))
 - Add macOS CI coverage ([#15](https://github.com/jdblackstar/relay/pull/15))
 - Tighten internal visibility ([#13](https://github.com/jdblackstar/relay/pull/13))
 - refactor: simplify config and sync control flow (#11)
+
 
 ## [0.2.2] - 2026-03-21
 
@@ -32,5 +38,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Initial tracked release; earlier history is in git.
 
 [0.2.2]: https://github.com/jdblackstar/relay/compare/v0.2.1...v0.2.2
-[Unreleased]: https://github.com/jdblackstar/relay/compare/v0.2.2...HEAD
+[0.2.3]: https://github.com/jdblackstar/relay/compare/v0.2.2...v0.2.3
+[Unreleased]: https://github.com/jdblackstar/relay/compare/v0.2.3...HEAD
 [0.2.1]: https://github.com/jdblackstar/relay/releases/tag/v0.2.1
