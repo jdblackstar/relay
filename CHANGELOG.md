@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- fix: make sync file writes atomic ([#16](https://github.com/jdblackstar/relay/pull/16))
 - Serialize mutating relay operations ([#14](https://github.com/jdblackstar/relay/pull/14))
 - Add macOS CI coverage ([#15](https://github.com/jdblackstar/relay/pull/15))
 - Tighten internal visibility ([#13](https://github.com/jdblackstar/relay/pull/13))
