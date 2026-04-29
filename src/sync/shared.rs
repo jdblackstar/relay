@@ -232,15 +232,6 @@ pub(crate) fn write_file(
     if mode == ExecutionMode::Plan {
         return Ok(());
     }
-    path.parent().map(fs::create_dir_all).transpose()?;
-    if let Ok(meta) = fs::metadata(path) {
-        if meta.is_dir() {
-            return Err(io::Error::new(
-                io::ErrorKind::AlreadyExists,
-                "expected file path but found directory",
-            ));
-        }
-    }
     let before = history
         .as_ref()
         .map(|recorder| recorder.capture_path(path))
