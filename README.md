@@ -11,7 +11,8 @@ Commands:
 - Claude commands: `$CLAUDE_HOME/commands` (default `~/.claude/commands`)
 - Cursor commands: `$CURSOR_HOME/commands` (default `~/.cursor/commands`)
 - OpenCode commands: `$OPENCODE_HOME/command` (default `~/.config/opencode/command`)
-- Codex prompts: `$CODEX_HOME/prompts` (default `~/.codex/prompts`)
+- Codex legacy prompts: `$CODEX_HOME/prompts` (default `~/.codex/prompts`)
+- Codex command skill wrappers: `$CODEX_HOME/skills/<name>/SKILL.md`
 
 Skills:
 
@@ -31,10 +32,13 @@ Rules:
 - Central store: `~/.config/relay/rules`
 - Codex rules: `$CODEX_HOME/rules/default.rules` (default `~/.codex/rules/default.rules`)
 
-Commands are markdown files (e.g. `review.md`). Codex invokes them as
-`/prompt:<name>`, but the file is stored as `<name>.md` in
-`$CODEX_HOME/prompts`. Skills are stored as directories named after the skill,
-with a `SKILL.md` inside (e.g. `review/SKILL.md`).
+Commands are markdown files (e.g. `review.md`). Relay writes Codex's legacy
+prompt file to `$CODEX_HOME/prompts/<name>.md` and also generates a Codex skill
+wrapper at `$CODEX_HOME/skills/<name>/SKILL.md`, so current Codex builds can
+discover the workflow through skills. Generated command skill wrappers include
+a `.relay-command` marker and are ignored by relay's normal skill sync. Skills
+are stored as directories named after the skill, with a `SKILL.md` inside
+(e.g. `review/SKILL.md`).
 Claude and OpenCode also read project commands from `.claude/commands/` and
 `.opencode/command/`, plus project skills from `.claude/skills/<name>/SKILL.md`
 and `.opencode/skill/<name>/SKILL.md`; relay currently syncs global locations
@@ -160,6 +164,8 @@ Setup and launchd scheduling guide: `docs/weekly-compat-pr.md`.
 - Skills are synced as directories, not single files, and must include `SKILL.md`.
 - Claude skills require frontmatter `name:` and `description:` in `SKILL.md`.
 - Codex skills are synced as directories with `SKILL.md` (same layout as Claude/OpenCode).
+- Codex command files are also mirrored as generated skill wrappers because
+  current Codex builds discover reusable workflows through skills.
 - AGENTS and rules are synced as files per tool into the central store.
 - OpenCode does not have a separate rules file; it uses `AGENTS.md` instead.
 - Frontmatter body is ignored for change detection except `name:` and
@@ -179,7 +185,8 @@ Setup and launchd scheduling guide: `docs/weekly-compat-pr.md`.
   `~/.config/relay` to the dotfiles location.
 - Version checks for `codex` and `claude` are best-effort and informational.
 - Legacy Codex files prefixed with `prompt:` are supported; relay writes plain
-  filenames for new copies.
+  filenames for new prompt copies and generated skill wrappers for current
+  Codex discovery.
 - Only selected tools are synced and watched.
 
 ## Adding Tools

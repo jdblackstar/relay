@@ -8,6 +8,7 @@ pub(crate) const LEGACY_AGENTS_BLACKLIST_KEY: &str = "agents/AGENTS.md";
 pub(crate) const CODEX_AGENTS_BLACKLIST_KEY: &str = "agents/codex/AGENTS.md";
 pub(crate) const OPENCODE_AGENTS_BLACKLIST_KEY: &str = "agents/opencode/AGENTS.md";
 pub(crate) const CODEX_RULES_BLACKLIST_KEY: &str = "rules/codex/default.rules";
+const RELAY_COMMAND_SKILL_MARKER: &str = ".relay-command";
 
 pub(crate) fn collect_tool_flags(
     claude: bool,
@@ -94,6 +95,16 @@ fn codex_legacy_prompt_candidate(codex_dir: &Path, suffix: &Path) -> Option<Path
     Some(codex_dir.join(format!("prompt:{name}")))
 }
 
+fn codex_command_skill_candidate(codex_skills_dir: &Path, suffix: &Path) -> Option<PathBuf> {
+    let mut components = suffix.components();
+    let name = match (components.next(), components.next()) {
+        (Some(Component::Normal(name)), None) => name.to_string_lossy(),
+        _ => return None,
+    };
+    let skill_name = name.strip_suffix(".md")?;
+    Some(codex_skills_dir.join(skill_name))
+}
+
 fn push_unique(paths: &mut Vec<PathBuf>, candidate: PathBuf) {
     if !paths.iter().any(|existing| existing == &candidate) {
         paths.push(candidate);
@@ -164,6 +175,11 @@ pub(crate) fn resolve_tool_paths(cfg: &Config, relative_path: &str, tool: &str) 
                 push_unique(&mut paths, cfg.codex_dir.join(suffix));
                 if let Some(legacy) = codex_legacy_prompt_candidate(&cfg.codex_dir, suffix) {
                     push_unique(&mut paths, legacy);
+                }
+                if let Some(skill) = codex_command_skill_candidate(&cfg.codex_skills_dir, suffix) {
+                    if skill.join(RELAY_COMMAND_SKILL_MARKER).exists() {
+                        push_unique(&mut paths, skill);
+                    }
                 }
             }
             TOOL_CURSOR => paths.push(cfg.cursor_dir.join(suffix)),

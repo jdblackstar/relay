@@ -145,6 +145,22 @@ mod tests {
     }
 
     #[test]
+    fn sync_all_does_not_reimport_codex_command_skill_wrappers() -> io::Result<()> {
+        let (_tmp, cfg) = setup()?;
+        write_plain(&cfg.central_dir.join("map.md"), "Map the repository.")?;
+
+        let outcome = sync_all_with_mode(&cfg, LogMode::Quiet, ExecutionMode::Apply, "sync")?;
+
+        assert!(outcome.report.commands.updated > 0);
+        assert_eq!(outcome.report.skills.updated, 0);
+        assert!(cfg.codex_skills_dir.join("map/SKILL.md").exists());
+        assert!(!cfg.central_skills_dir.join("map/SKILL.md").exists());
+        assert!(!cfg.claude_skills_dir.join("map/SKILL.md").exists());
+        assert!(!cfg.opencode_skills_dir.join("map/SKILL.md").exists());
+        Ok(())
+    }
+
+    #[test]
     fn sync_all_with_mode_collects_conflicts_across_categories() -> io::Result<()> {
         let (_tmp, cfg) = setup()?;
 

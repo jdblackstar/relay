@@ -11,6 +11,7 @@ use std::time::UNIX_EPOCH;
 
 pub(crate) const TOOL_CENTRAL: &str = "central";
 pub(crate) const CONFLICT_WINDOW_NS: u128 = 2_000_000_000;
+pub(crate) const RELAY_COMMAND_SKILL_MARKER: &str = ".relay-command";
 
 pub(crate) struct MarkdownDoc {
     pub(crate) raw: String,

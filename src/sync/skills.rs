@@ -1,7 +1,8 @@
 use super::shared::{
     collect_names, conflict_for_variants, file_mtime_value_from_meta, hash_bytes, list_if,
     log_action, read_markdown, read_visible_entry, required_frontmatter_hash,
-    select_frontmatter_for_target, tool_order, write_file, TOOL_CENTRAL,
+    select_frontmatter_for_target, tool_order, write_file, RELAY_COMMAND_SKILL_MARKER,
+    TOOL_CENTRAL,
 };
 use super::{ExecutionMode, LogMode as SyncLogMode, SyncConflict, SyncItemKind, SyncStats};
 use crate::config::{Config, TOOL_CLAUDE, TOOL_CODEX, TOOL_OPENCODE};
@@ -257,7 +258,10 @@ fn list_skill_dirs(dir: &Path) -> io::Result<HashMap<String, PathBuf>> {
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
         if let Some((name, path, meta)) = read_visible_entry(entry, true)? {
-            if meta.is_dir() && path.join("SKILL.md").exists() {
+            if meta.is_dir()
+                && path.join("SKILL.md").exists()
+                && !path.join(RELAY_COMMAND_SKILL_MARKER).exists()
+            {
                 out.insert(name, path);
             }
         }
@@ -512,11 +516,14 @@ mod tests {
         fs::create_dir_all(&missing)?;
         let _valid = write_skill(&dir, "valid", "skill")?;
         let _hidden = write_skill(&dir, ".hidden", "hidden")?;
+        let generated = write_skill(&dir, "generated", "generated")?;
+        write_plain(&generated.join(RELAY_COMMAND_SKILL_MARKER), "generated")?;
         write_plain(&dir.join("notadir"), "file")?;
 
         let list = list_skill_dirs(&dir)?;
         assert!(list.contains_key("valid"));
         assert!(!list.contains_key("missing"));
+        assert!(!list.contains_key("generated"));
         Ok(())
     }
 
