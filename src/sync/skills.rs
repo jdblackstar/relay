@@ -1,9 +1,9 @@
 use super::shared::{
     collect_names, conflict_for_variants, file_mtime_value_from_meta, hash_bytes, list_if,
     log_action, read_markdown, read_visible_entry, required_frontmatter_hash,
-    select_frontmatter_for_target, tool_order, write_file, RELAY_COMMAND_SKILL_MARKER,
-    TOOL_CENTRAL,
+    select_frontmatter_for_target, tool_order, write_file, TOOL_CENTRAL,
 };
+use crate::markers::{is_relay_generated_command_skill, RELAY_COMMAND_SKILL_MARKER};
 use super::{ExecutionMode, LogMode as SyncLogMode, SyncConflict, SyncItemKind, SyncStats};
 use crate::config::{Config, TOOL_CLAUDE, TOOL_CODEX, TOOL_OPENCODE};
 use crate::history::HistoryRecorder;
@@ -260,7 +260,7 @@ fn list_skill_dirs(dir: &Path) -> io::Result<HashMap<String, PathBuf>> {
         if let Some((name, path, meta)) = read_visible_entry(entry, true)? {
             if meta.is_dir()
                 && path.join("SKILL.md").exists()
-                && !path.join(RELAY_COMMAND_SKILL_MARKER).exists()
+                && !is_relay_generated_command_skill(&path)
             {
                 out.insert(name, path);
             }

@@ -5,6 +5,7 @@ mod daemon;
 mod history;
 mod init;
 mod logging;
+mod markers;
 mod process_lock;
 mod report;
 mod sync;

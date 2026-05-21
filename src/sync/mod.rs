@@ -3,6 +3,7 @@ use crate::history::HistoryRecorder;
 use std::io;
 
 mod agents;
+mod codex_commands;
 mod commands;
 mod rules;
 mod shared;
