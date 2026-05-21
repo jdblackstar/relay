@@ -146,6 +146,29 @@ mod tests {
     }
 
     #[test]
+    fn sync_all_preserves_codex_command_skill_wrapper_when_skill_name_collides(
+    ) -> io::Result<()> {
+        let (_tmp, cfg) = setup()?;
+        write_plain(&cfg.central_dir.join("map.md"), "Map command body.")?;
+        write_skill(
+            &cfg.central_skills_dir,
+            "map",
+            &doc("central", "Central skill body."),
+        )?;
+
+        sync_all_with_mode(&cfg, LogMode::Quiet, ExecutionMode::Apply, "sync")?;
+
+        let wrapper = fs::read_to_string(cfg.codex_skills_dir.join("map/SKILL.md"))?;
+        assert!(wrapper.contains("Map command body."));
+        assert!(!wrapper.contains("Central skill body."));
+        assert!(cfg
+            .codex_skills_dir
+            .join(format!("map/{}", crate::markers::RELAY_COMMAND_SKILL_MARKER))
+            .exists());
+        Ok(())
+    }
+
+    #[test]
     fn sync_all_does_not_reimport_codex_command_skill_wrappers() -> io::Result<()> {
         let (_tmp, cfg) = setup()?;
         write_plain(&cfg.central_dir.join("map.md"), "Map the repository.")?;

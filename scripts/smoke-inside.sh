@@ -11,6 +11,7 @@ export CURSOR_HOME="${CURSOR_HOME:-$HOME/.cursor}"
 export OPENCODE_HOME="${OPENCODE_HOME:-$HOME/.config/opencode}"
 export PATH="/usr/local/cargo/bin:/usr/local/rustup/bin:${PATH}"
 WATCH_DEBOUNCE_MS="${WATCH_DEBOUNCE_MS:-200}"
+RELAY_BIN="${CARGO_TARGET_DIR:-${REPO_ROOT}/target}/debug/relay"
 
 if ! command -v cargo >/dev/null 2>&1; then
     echo "error: cargo not found on PATH" >&2
@@ -36,67 +37,36 @@ wait_for_file() {
     return 1
 }
 
+assert_codex_command_skill_wrapper() {
+    local name="$1"
+    local expected_body="$2"
+    local skill_path="$CODEX_HOME/skills/${name}/SKILL.md"
+    local marker_path="$CODEX_HOME/skills/${name}/.relay-command"
+
+    if [[ ! -f "$skill_path" ]]; then
+        echo "error: missing codex command skill wrapper at $skill_path" >&2
+        exit 1
+    fi
+    if [[ ! -f "$marker_path" ]]; then
+        echo "error: missing relay command marker at $marker_path" >&2
+        exit 1
+    fi
+    if ! grep -q "$expected_body" "$skill_path"; then
+        echo "error: codex skill wrapper missing expected body at $skill_path" >&2
+        exit 1
+    fi
+}
+
 for bin in codex claude opencode; do
     if ! command -v "$bin" >/dev/null 2>&1; then
         echo "note: ${bin} not found on PATH (install if needed)"
     fi
 done
 
-mkdir -p \
-    "$CODEX_HOME/prompts" \
-    "$CODEX_HOME/skills/codex-smoke" \
-    "$CODEX_HOME/rules" \
-    "$CLAUDE_HOME/commands" \
-    "$CLAUDE_HOME/skills/claude-smoke" \
-    "$OPENCODE_HOME/command" \
-    "$OPENCODE_HOME/skill/opencode-smoke"
-
-cat <<'EOF' > "$CODEX_HOME/prompts/codex-smoke.md"
-Codex smoke command.
-EOF
-
-cat <<'EOF' > "$CLAUDE_HOME/commands/claude-smoke.md"
-Claude smoke command.
-EOF
-
-cat <<'EOF' > "$OPENCODE_HOME/command/opencode-smoke.md"
-OpenCode smoke command.
-EOF
-
-cat <<'EOF' > "$CODEX_HOME/skills/codex-smoke/SKILL.md"
-Codex smoke skill body.
-EOF
-
-cat <<'EOF' > "$CLAUDE_HOME/skills/claude-smoke/SKILL.md"
----
-name: claude-smoke
-description: Claude smoke skill.
----
-Claude smoke skill body.
-EOF
-
-cat <<'EOF' > "$OPENCODE_HOME/skill/opencode-smoke/SKILL.md"
----
-name: opencode-smoke
-description: OpenCode smoke skill.
----
-OpenCode smoke skill body.
-EOF
-
-cat <<'EOF' > "$CODEX_HOME/rules/default.rules"
-rule("smoke")
-EOF
-
-cat <<'EOF' > "$CODEX_HOME/AGENTS.md"
-Codex smoke agents.
-EOF
-
-cat <<'EOF' > "$OPENCODE_HOME/AGENTS.md"
-OpenCode smoke agents.
-EOF
+"${REPO_ROOT}/scripts/smoke-seed.sh"
 
 cargo build
-./target/debug/relay sync --verbose
+"$RELAY_BIN" sync --verbose
 
 test -f "$HOME/.config/relay/commands/codex-smoke.md"
 test -f "$HOME/.config/relay/commands/claude-smoke.md"
@@ -108,8 +78,12 @@ test -f "$HOME/.config/relay/agents/codex/AGENTS.md"
 test -f "$HOME/.config/relay/agents/opencode/AGENTS.md"
 test -f "$HOME/.config/relay/rules/codex/default.rules"
 
+assert_codex_command_skill_wrapper "claude-smoke" "Claude smoke command."
+assert_codex_command_skill_wrapper "cursor-smoke" "Cursor smoke command."
+assert_codex_command_skill_wrapper "opencode-smoke" "OpenCode smoke command."
+
 watch_log="$(mktemp)"
-./target/debug/relay watch --quiet --debounce-ms "$WATCH_DEBOUNCE_MS" >"$watch_log" 2>&1 &
+"$RELAY_BIN" watch --quiet --debounce-ms "$WATCH_DEBOUNCE_MS" >"$watch_log" 2>&1 &
 watch_pid=$!
 
 # Wait for watch to be ready by writing a probe file and waiting for it to be processed
@@ -167,7 +141,7 @@ if ! write_test_file; then
     exit 1
 fi
 
-wait_for_file "$CODEX_HOME/prompts/watch-smoke.md" "$watch_log"
+wait_for_file "$CODEX_HOME/skills/watch-smoke/SKILL.md" "$watch_log"
 wait_for_file "$OPENCODE_HOME/command/watch-smoke.md" "$watch_log"
 
 if ! grep -q "Claude watch smoke command." "$HOME/.config/relay/commands/watch-smoke.md"; then
@@ -175,10 +149,7 @@ if ! grep -q "Claude watch smoke command." "$HOME/.config/relay/commands/watch-s
     exit 1
 fi
 
-if ! grep -q "Claude watch smoke command." "$CODEX_HOME/prompts/watch-smoke.md"; then
-    echo "error: watch smoke content missing in codex" >&2
-    exit 1
-fi
+assert_codex_command_skill_wrapper "watch-smoke" "Claude watch smoke command."
 
 if ! grep -q "Claude watch smoke command." "$OPENCODE_HOME/command/watch-smoke.md"; then
     echo "error: watch smoke content missing in opencode" >&2

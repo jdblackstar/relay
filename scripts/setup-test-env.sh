@@ -20,6 +20,7 @@ mkdir -p \
 cat > "${ENV_FILE}" <<EOF
 export RELAY_REPO_ROOT="${REPO_ROOT}"
 export RELAY_HOME="${HOME_DIR}"
+export HOME="${HOME_DIR}"
 export CODEX_HOME="${HOME_DIR}/.codex"
 export CLAUDE_HOME="${HOME_DIR}/.claude"
 export OPENCODE_HOME="${HOME_DIR}/.config/opencode"
@@ -43,3 +44,6 @@ echo "Then run examples:"
 echo "  relay sync --plan --verbose"
 echo "  relay sync --apply --verbose"
 echo "  relay watch --quiet"
+echo
+echo "Or start the interactive smoke shell (fixtures + helpers):"
+echo "  ./scripts/smoke-interactive.sh"

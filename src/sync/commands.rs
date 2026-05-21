@@ -6,6 +6,7 @@ use super::shared::{
 use super::{ExecutionMode, LogMode, SyncConflict, SyncItemKind, SyncStats};
 use crate::config::{Config, TOOL_CLAUDE, TOOL_CODEX, TOOL_CURSOR, TOOL_OPENCODE};
 use crate::history::HistoryRecorder;
+use crate::versions::codex_supports_custom_prompts;
 use std::collections::HashMap;
 use std::io;
 
@@ -34,12 +35,15 @@ pub(crate) fn sync_commands_with_mode(
     let claude_enabled = cfg.tool_enabled(TOOL_CLAUDE) && cfg.claude_dir.exists();
     let cursor_enabled = cfg.tool_enabled(TOOL_CURSOR) && cfg.cursor_dir.exists();
     let opencode_enabled = cfg.tool_enabled(TOOL_OPENCODE) && cfg.opencode_commands_dir.exists();
-    let codex_enabled = cfg.tool_enabled(TOOL_CODEX) && cfg.codex_dir.exists();
+    let codex_prompts_enabled = cfg.tool_enabled(TOOL_CODEX)
+        && cfg.codex_dir.exists()
+        && codex_supports_custom_prompts(cfg);
+    let codex_skills_enabled = cfg.tool_enabled(TOOL_CODEX) && cfg.codex_skills_dir.exists();
 
     let claude = list_if(claude_enabled, &cfg.claude_dir, list_files)?;
     let cursor = list_if(cursor_enabled, &cfg.cursor_dir, list_files)?;
     let opencode = list_if(opencode_enabled, &cfg.opencode_commands_dir, list_files)?;
-    let codex = list_if(codex_enabled, &cfg.codex_dir, list_codex_files)?;
+    let codex = list_if(codex_prompts_enabled, &cfg.codex_dir, list_codex_files)?;
     let central = if cfg.central_dir.exists() {
         list_files(&cfg.central_dir)?
     } else {
@@ -85,7 +89,7 @@ pub(crate) fn sync_commands_with_mode(
             (TOOL_CLAUDE, claude_enabled, &cfg.claude_dir),
             (TOOL_CURSOR, cursor_enabled, &cfg.cursor_dir),
             (TOOL_OPENCODE, opencode_enabled, &cfg.opencode_commands_dir),
-            (TOOL_CODEX, codex_enabled, &cfg.codex_dir),
+            (TOOL_CODEX, codex_prompts_enabled, &cfg.codex_dir),
         ] {
             if !enabled {
                 continue;
@@ -114,7 +118,7 @@ pub(crate) fn sync_commands_with_mode(
             stats.updated += usize::from(updated);
         }
 
-        if codex_enabled && !cfg.is_blacklisted(&blacklist_key, TOOL_CODEX) {
+        if codex_skills_enabled && !cfg.is_blacklisted(&blacklist_key, TOOL_CODEX) {
             let updated = super::codex_commands::sync_codex_command_skill_wrapper(
                 source,
                 &cfg.codex_skills_dir,
@@ -333,6 +337,58 @@ mod tests {
         assert!(read_frontmatter(&codex)?
             .unwrap_or_default()
             .contains("name: cursor"));
+        Ok(())
+    }
+
+    #[test]
+    fn sync_commands_ignores_stale_codex_prompts_when_version_unsupported() -> io::Result<()> {
+        let (_tmp, mut cfg) = setup()?;
+        cfg.verified_versions
+            .insert(TOOL_CODEX.to_string(), "0.117.0".to_string());
+
+        let claude = cfg.claude_dir.join("review.md");
+        let codex = cfg.codex_dir.join("review.md");
+        write_plain(&claude, &doc("claude", "Claude body"))?;
+        write_plain(&codex, &doc("codex", "Stale codex prompt"))?;
+        crate::sync::test_support::set_mtime(&codex, 9_000_000_000)?;
+
+        sync_commands(&cfg, LogMode::Quiet)?;
+
+        assert_eq!(read_body(&claude)?, "Claude body");
+        assert_eq!(read_body(&cfg.central_dir.join("review.md"))?, "Claude body");
+        assert!(cfg.codex_skills_dir.join("review/SKILL.md").exists());
+        Ok(())
+    }
+
+    #[test]
+    fn sync_commands_skips_codex_prompts_when_version_unsupported() -> io::Result<()> {
+        let (_tmp, mut cfg) = setup()?;
+        cfg.verified_versions
+            .insert(TOOL_CODEX.to_string(), "0.117.0".to_string());
+
+        let claude = cfg.claude_dir.join("review.md");
+        write_plain(&claude, &doc("claude", "Review body"))?;
+
+        sync_commands(&cfg, LogMode::Quiet)?;
+
+        assert!(!cfg.codex_dir.join("review.md").exists());
+        assert!(cfg.codex_skills_dir.join("review/SKILL.md").exists());
+        Ok(())
+    }
+
+    #[test]
+    fn sync_commands_still_writes_codex_prompts_for_legacy_version() -> io::Result<()> {
+        let (_tmp, mut cfg) = setup()?;
+        cfg.verified_versions
+            .insert(TOOL_CODEX.to_string(), "0.116.9".to_string());
+
+        let claude = cfg.claude_dir.join("review.md");
+        write_plain(&claude, &doc("claude", "Review body"))?;
+
+        sync_commands(&cfg, LogMode::Quiet)?;
+
+        assert!(cfg.codex_dir.join("review.md").exists());
+        assert!(cfg.codex_skills_dir.join("review/SKILL.md").exists());
         Ok(())
     }
 

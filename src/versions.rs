@@ -1,4 +1,4 @@
-use crate::config::Config;
+use crate::config::{Config, TOOL_CODEX};
 use crate::tools::{tool_detected, TOOL_DEFINITIONS};
 use console::style;
 
@@ -6,6 +6,12 @@ use console::style;
 use dialoguer::{theme::ColorfulTheme, Confirm};
 #[cfg(not(any(test, coverage)))]
 use std::process::Command;
+
+/// Codex removed custom prompt discovery in 0.117.0 (Mar 2026).
+pub(crate) const CODEX_CUSTOM_PROMPTS_REMOVED_AT: ParsedVersion = ParsedVersion {
+    major: 0,
+    minor: 117,
+};
 
 pub(crate) fn check_versions(cfg: &Config) -> bool {
     let mut mismatch = false;
@@ -72,13 +78,13 @@ enum VersionStatus {
     Old,
 }
 
-#[derive(Clone, Copy)]
-struct ParsedVersion {
-    major: u64,
-    minor: u64,
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct ParsedVersion {
+    pub major: u64,
+    pub minor: u64,
 }
 
-fn extract_version_token(input: &str) -> Option<String> {
+pub(crate) fn extract_version_token(input: &str) -> Option<String> {
     let mut start = None;
     for (idx, ch) in input.char_indices() {
         if ch.is_ascii_digit() {
@@ -98,7 +104,7 @@ fn extract_version_token(input: &str) -> Option<String> {
     Some(input[start..end].to_string())
 }
 
-fn parse_version(token: &str) -> Option<ParsedVersion> {
+pub(crate) fn parse_version(token: &str) -> Option<ParsedVersion> {
     let mut parts = token.split('.').filter(|part| !part.is_empty());
     let major = parts.next()?.parse::<u64>().ok()?;
     let minor = parts
@@ -106,6 +112,43 @@ fn parse_version(token: &str) -> Option<ParsedVersion> {
         .and_then(|p| p.parse::<u64>().ok())
         .unwrap_or(0);
     Some(ParsedVersion { major, minor })
+}
+
+pub(crate) fn version_at_least(actual: ParsedVersion, minimum: ParsedVersion) -> bool {
+    actual >= minimum
+}
+
+pub(crate) fn resolve_tool_version(cfg: &Config, tool: &str, bin: &str) -> Option<ParsedVersion> {
+    detect_tool_version(bin).or_else(|| {
+        cfg.verified_version(tool).and_then(|verified| {
+            let token = extract_version_token(verified).unwrap_or_else(|| verified.to_string());
+            parse_version(&token)
+        })
+    })
+}
+
+pub(crate) fn codex_supports_custom_prompts(cfg: &Config) -> bool {
+    resolve_tool_version(cfg, TOOL_CODEX, "codex")
+        .is_some_and(|version| !version_at_least(version, CODEX_CUSTOM_PROMPTS_REMOVED_AT))
+}
+
+#[cfg(not(any(test, coverage)))]
+fn detect_tool_version(bin: &str) -> Option<ParsedVersion> {
+    let output = Command::new(bin).arg("--version").output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if version.is_empty() {
+        return None;
+    }
+    let token = extract_version_token(&version)?;
+    parse_version(&token)
+}
+
+#[cfg(any(test, coverage))]
+fn detect_tool_version(_bin: &str) -> Option<ParsedVersion> {
+    None
 }
 
 fn classify_version(actual: ParsedVersion, verified: ParsedVersion) -> VersionStatus {
@@ -215,6 +258,41 @@ mod tests {
         assert!(TOOL_DEFINITIONS
             .iter()
             .any(|tool| tool.id == TOOL_CURSOR && tool.version_bin == Some("cursor")));
+    }
+
+    #[test]
+    fn codex_supports_custom_prompts_respects_verified_version() {
+        let tmp = TempDir::new().unwrap();
+        let mut cfg = make_config(&tmp);
+
+        cfg.verified_versions
+            .insert(TOOL_CODEX.to_string(), "0.116.0".to_string());
+        assert!(codex_supports_custom_prompts(&cfg));
+
+        cfg.verified_versions
+            .insert(TOOL_CODEX.to_string(), "0.117.0".to_string());
+        assert!(!codex_supports_custom_prompts(&cfg));
+
+        cfg.verified_versions.clear();
+        assert!(!codex_supports_custom_prompts(&cfg));
+    }
+
+    #[test]
+    fn version_at_least_compares_major_then_minor() {
+        assert!(version_at_least(
+            ParsedVersion {
+                major: 0,
+                minor: 117
+            },
+            CODEX_CUSTOM_PROMPTS_REMOVED_AT
+        ));
+        assert!(!version_at_least(
+            ParsedVersion {
+                major: 0,
+                minor: 116
+            },
+            CODEX_CUSTOM_PROMPTS_REMOVED_AT
+        ));
     }
 
     #[test]

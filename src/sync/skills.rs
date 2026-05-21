@@ -124,6 +124,9 @@ pub(crate) fn sync_skills_with_mode(
             if tool != TOOL_CENTRAL && cfg.is_blacklisted(&format!("skills/{name}"), tool) {
                 continue;
             }
+            if tool == TOOL_CODEX && is_relay_generated_command_skill(&base_dir.join(&name)) {
+                continue;
+            }
             let updated = sync_skill_for_tool(
                 tool, base_dir, &name, winner, &variants, log_mode, mode, history,
             )?;

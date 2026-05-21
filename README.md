@@ -11,7 +11,7 @@ Commands:
 - Claude commands: `$CLAUDE_HOME/commands` (default `~/.claude/commands`)
 - Cursor commands: `$CURSOR_HOME/commands` (default `~/.cursor/commands`)
 - OpenCode commands: `$OPENCODE_HOME/command` (default `~/.config/opencode/command`)
-- Codex legacy prompts: `$CODEX_HOME/prompts` (default `~/.codex/prompts`)
+- Codex legacy prompts: `$CODEX_HOME/prompts` (default `~/.codex/prompts`; synced only on Codex < 0.117.0)
 - Codex command skill wrappers: `$CODEX_HOME/skills/<name>/SKILL.md`
 
 Skills:
@@ -32,13 +32,14 @@ Rules:
 - Central store: `~/.config/relay/rules`
 - Codex rules: `$CODEX_HOME/rules/default.rules` (default `~/.codex/rules/default.rules`)
 
-Commands are markdown files (e.g. `review.md`). Relay writes Codex's legacy
-prompt file to `$CODEX_HOME/prompts/<name>.md` and also generates a Codex skill
+Commands are markdown files (e.g. `review.md`). For Codex, relay generates a skill
 wrapper at `$CODEX_HOME/skills/<name>/SKILL.md`, so current Codex builds can
-discover the workflow through skills. Generated command skill wrappers include
-a `.relay-command` marker and are ignored by relay's normal skill sync. Skills
-are stored as directories named after the skill, with a `SKILL.md` inside
-(e.g. `review/SKILL.md`).
+discover the workflow through skills. Legacy prompt files at
+`$CODEX_HOME/prompts/<name>.md` are written only when Codex is older than
+0.117.0 (custom prompts were removed in that release). Generated command skill
+wrappers include a `.relay-command` marker and are ignored by relay's normal
+skill sync. Skills are stored as directories named after the skill, with a
+`SKILL.md` inside (e.g. `review/SKILL.md`).
 Claude and OpenCode also read project commands from `.claude/commands/` and
 `.opencode/command/`, plus project skills from `.claude/skills/<name>/SKILL.md`
 and `.opencode/skill/<name>/SKILL.md`; relay currently syncs global locations

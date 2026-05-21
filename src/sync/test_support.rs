@@ -1,6 +1,7 @@
 use crate::config::{Config, TOOL_CLAUDE, TOOL_CODEX, TOOL_CURSOR, TOOL_OPENCODE};
 use crate::sync::shared::read_markdown;
 use filetime::{set_file_mtime, FileTime};
+use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::path::Path;
@@ -14,7 +15,7 @@ pub(crate) fn make_config(tmp: &TempDir) -> Config {
             TOOL_CURSOR.to_string(),
             TOOL_OPENCODE.to_string(),
         ],
-        verified_versions: std::collections::HashMap::new(),
+        verified_versions: HashMap::from([(TOOL_CODEX.to_string(), "0.116.0".to_string())]),
         blacklist: std::collections::HashMap::new(),
         central_dir: tmp.path().join("central"),
         central_skills_dir: tmp.path().join("central_skills"),
