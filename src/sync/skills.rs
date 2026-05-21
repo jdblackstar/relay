@@ -3,7 +3,7 @@ use super::shared::{
     log_action, read_markdown, read_visible_entry, required_frontmatter_hash,
     select_frontmatter_for_target, tool_order, write_file, TOOL_CENTRAL,
 };
-use crate::markers::{is_relay_generated_command_skill, RELAY_COMMAND_SKILL_MARKER};
+use crate::markers::is_relay_generated_command_skill;
 use super::{ExecutionMode, LogMode as SyncLogMode, SyncConflict, SyncItemKind, SyncStats};
 use crate::config::{Config, TOOL_CLAUDE, TOOL_CODEX, TOOL_OPENCODE};
 use crate::history::HistoryRecorder;
@@ -377,6 +377,7 @@ fn skill_temp_path(target: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::markers::RELAY_COMMAND_SKILL_MARKER;
     use crate::sync::test_support::{doc, setup, write_plain, write_skill};
     use tempfile::TempDir;
 
