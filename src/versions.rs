@@ -1,5 +1,5 @@
-use crate::config::{Config, TOOL_CLAUDE, TOOL_CODEX, TOOL_OPENCODE};
-use crate::tools::tool_detected;
+use crate::config::Config;
+use crate::tools::{tool_detected, TOOL_DEFINITIONS};
 use console::style;
 
 #[cfg(not(any(test, coverage)))]
@@ -9,23 +9,15 @@ use std::process::Command;
 
 pub(crate) fn check_versions(cfg: &Config) -> bool {
     let mut mismatch = false;
-    if cfg.tool_enabled(TOOL_CODEX)
-        && tool_detected(cfg, TOOL_CODEX)
-        && check_command_version("codex", cfg.verified_version(TOOL_CODEX))
-    {
-        mismatch = true;
-    }
-    if cfg.tool_enabled(TOOL_CLAUDE)
-        && tool_detected(cfg, TOOL_CLAUDE)
-        && check_command_version("claude", cfg.verified_version(TOOL_CLAUDE))
-    {
-        mismatch = true;
-    }
-    if cfg.tool_enabled(TOOL_OPENCODE)
-        && tool_detected(cfg, TOOL_OPENCODE)
-        && check_command_version("opencode", cfg.verified_version(TOOL_OPENCODE))
-    {
-        mismatch = true;
+    for tool in TOOL_DEFINITIONS {
+        if let Some(bin) = tool.version_bin {
+            if cfg.tool_enabled(tool.id)
+                && tool_detected(cfg, tool.id)
+                && check_command_version(bin, cfg.verified_version(tool.id))
+            {
+                mismatch = true;
+            }
+        }
     }
     mismatch
 }
@@ -216,6 +208,13 @@ mod tests {
         assert!(matches!(status, VersionStatus::Warn));
         let status = classify_version(parsed, ParsedVersion { major: 2, minor: 0 });
         assert!(matches!(status, VersionStatus::Old));
+    }
+
+    #[test]
+    fn tool_definitions_include_cursor_cli_version() {
+        assert!(TOOL_DEFINITIONS
+            .iter()
+            .any(|tool| tool.id == TOOL_CURSOR && tool.version_bin == Some("cursor")));
     }
 
     #[test]

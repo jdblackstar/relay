@@ -4,6 +4,7 @@ use std::path::PathBuf;
 pub(crate) struct ToolDefinition {
     pub id: &'static str,
     pub label: &'static str,
+    pub version_bin: Option<&'static str>,
     pub commands_dir: Option<fn(&Config) -> &PathBuf>,
     pub skills_dir: Option<fn(&Config) -> &PathBuf>,
     pub agents_file: Option<fn(&Config) -> &PathBuf>,
@@ -54,6 +55,7 @@ pub(crate) const TOOL_DEFINITIONS: [ToolDefinition; 4] = [
     ToolDefinition {
         id: TOOL_CLAUDE,
         label: "Claude Code",
+        version_bin: Some("claude"),
         commands_dir: Some(claude_commands),
         skills_dir: Some(claude_skills),
         agents_file: None,
@@ -62,6 +64,7 @@ pub(crate) const TOOL_DEFINITIONS: [ToolDefinition; 4] = [
     ToolDefinition {
         id: TOOL_CODEX,
         label: "Codex CLI",
+        version_bin: Some("codex"),
         commands_dir: Some(codex_commands),
         skills_dir: Some(codex_skills),
         agents_file: Some(codex_agents),
@@ -70,6 +73,7 @@ pub(crate) const TOOL_DEFINITIONS: [ToolDefinition; 4] = [
     ToolDefinition {
         id: TOOL_CURSOR,
         label: "Cursor",
+        version_bin: Some("cursor"),
         commands_dir: Some(cursor_commands),
         skills_dir: None,
         agents_file: None,
@@ -78,6 +82,7 @@ pub(crate) const TOOL_DEFINITIONS: [ToolDefinition; 4] = [
     ToolDefinition {
         id: TOOL_OPENCODE,
         label: "OpenCode",
+        version_bin: Some("opencode"),
         commands_dir: Some(opencode_commands),
         skills_dir: Some(opencode_skills),
         agents_file: Some(opencode_agents),
