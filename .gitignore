@@ -2,4 +2,5 @@ target/
 *.swp
 .DS_Store
 .local/
+.entire/
 PLAN.md
