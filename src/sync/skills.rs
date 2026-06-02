@@ -3,12 +3,12 @@ use super::shared::{
     log_action, read_markdown, read_visible_entry, required_frontmatter_hash,
     select_frontmatter_for_target, tool_order, write_file, TOOL_CENTRAL,
 };
-use crate::markers::is_relay_generated_command_skill;
 use super::{ExecutionMode, LogMode as SyncLogMode, SyncConflict, SyncItemKind, SyncStats};
 use crate::config::{Config, TOOL_CLAUDE, TOOL_CODEX, TOOL_OPENCODE};
 use crate::history::HistoryRecorder;
+use crate::markers::is_relay_generated_command_skill;
 use std::collections::hash_map::DefaultHasher;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
 use std::hash::{Hash, Hasher};
@@ -124,9 +124,6 @@ pub(crate) fn sync_skills_with_mode(
             if tool != TOOL_CENTRAL && cfg.is_blacklisted(&format!("skills/{name}"), tool) {
                 continue;
             }
-            if tool == TOOL_CODEX && is_relay_generated_command_skill(&base_dir.join(&name)) {
-                continue;
-            }
             let updated = sync_skill_for_tool(
                 tool, base_dir, &name, winner, &variants, log_mode, mode, history,
             )?;
@@ -135,6 +132,41 @@ pub(crate) fn sync_skills_with_mode(
     }
 
     Ok(stats)
+}
+
+pub(super) fn codex_real_skill_names(cfg: &Config) -> io::Result<HashSet<String>> {
+    let mut names = HashSet::new();
+    let codex_enabled = cfg.tool_enabled(TOOL_CODEX) && cfg.codex_skills_dir.exists();
+    if !codex_enabled {
+        return Ok(names);
+    }
+
+    if cfg.codex_skills_dir.exists() {
+        names.extend(list_skill_dirs(&cfg.codex_skills_dir)?.into_keys());
+    }
+
+    for (enabled, dir) in [
+        (cfg.central_skills_dir.exists(), &cfg.central_skills_dir),
+        (
+            cfg.tool_enabled(TOOL_CLAUDE) && cfg.claude_skills_dir.exists(),
+            &cfg.claude_skills_dir,
+        ),
+        (
+            cfg.tool_enabled(TOOL_OPENCODE) && cfg.opencode_skills_dir.exists(),
+            &cfg.opencode_skills_dir,
+        ),
+    ] {
+        if !enabled {
+            continue;
+        }
+        for name in list_skill_dirs(dir)?.into_keys() {
+            if !cfg.is_blacklisted(&format!("skills/{name}"), TOOL_CODEX) {
+                names.insert(name);
+            }
+        }
+    }
+
+    Ok(names)
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -12,7 +12,7 @@ Keep this up to date as tooling changes.
 
 ## Commands (slash prompts)
 
-- Codex: `true`. Relay writes generated command skill wrappers at `$CODEX_HOME/skills/name/SKILL.md` for current Codex builds. Legacy `$CODEX_HOME/prompts/name.md` files are synced only when the detected or configured Codex version is older than 0.117.0 (custom prompts were removed in 0.117.0). Generated wrappers include `.relay-command` and are ignored by relay skill sync.
+- Codex: `true`. Relay writes generated command skill wrappers at `$CODEX_HOME/skills/name/SKILL.md` for current Codex builds. Legacy `$CODEX_HOME/prompts/name.md` files are read for migration, but relay only writes prompt files when the detected or configured Codex version is older than 0.117.0 (custom prompts were removed in 0.117.0). Generated wrappers include `.relay-command`, are ignored as skill sources, and are skipped when a real skill already owns the same name.
 - Claude: `true`. `/name` maps to `~/.claude/commands/name.md` and project `.claude/commands/`.
 - OpenCode: `true`. Global `~/.config/opencode/command/name.md` and project `.opencode/command/name.md`.
 - Cursor: not supported by relay (project-scoped rules only; skills incomplete).

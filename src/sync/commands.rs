@@ -7,7 +7,7 @@ use super::{ExecutionMode, LogMode, SyncConflict, SyncItemKind, SyncStats};
 use crate::config::{Config, TOOL_CLAUDE, TOOL_CODEX, TOOL_CURSOR, TOOL_OPENCODE};
 use crate::history::HistoryRecorder;
 use crate::versions::codex_supports_custom_prompts;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io;
 
 #[cfg(any(test, coverage))]
@@ -30,20 +30,39 @@ pub(crate) fn sync_commands_with_mode(
     history: &mut Option<HistoryRecorder>,
     conflicts: &mut Vec<SyncConflict>,
 ) -> io::Result<SyncStats> {
+    sync_commands_with_reserved_codex_skill_names(
+        cfg,
+        log_mode,
+        mode,
+        history,
+        conflicts,
+        &HashSet::new(),
+    )
+}
+
+pub(crate) fn sync_commands_with_reserved_codex_skill_names(
+    cfg: &Config,
+    log_mode: LogMode,
+    mode: ExecutionMode,
+    history: &mut Option<HistoryRecorder>,
+    conflicts: &mut Vec<SyncConflict>,
+    reserved_codex_skill_names: &HashSet<String>,
+) -> io::Result<SyncStats> {
     let mut stats = SyncStats::default();
 
     let claude_enabled = cfg.tool_enabled(TOOL_CLAUDE) && cfg.claude_dir.exists();
     let cursor_enabled = cfg.tool_enabled(TOOL_CURSOR) && cfg.cursor_dir.exists();
     let opencode_enabled = cfg.tool_enabled(TOOL_OPENCODE) && cfg.opencode_commands_dir.exists();
-    let codex_prompts_enabled = cfg.tool_enabled(TOOL_CODEX)
-        && cfg.codex_dir.exists()
-        && codex_supports_custom_prompts(cfg);
-    let codex_skills_enabled = cfg.tool_enabled(TOOL_CODEX) && cfg.codex_skills_dir.exists();
+    let codex_enabled = cfg.tool_enabled(TOOL_CODEX);
+    let codex_prompts_read_enabled = codex_enabled && cfg.codex_dir.exists();
+    let codex_prompts_write_enabled =
+        codex_prompts_read_enabled && codex_supports_custom_prompts(cfg);
+    let codex_skills_enabled = codex_enabled && cfg.codex_skills_dir.exists();
 
     let claude = list_if(claude_enabled, &cfg.claude_dir, list_files)?;
     let cursor = list_if(cursor_enabled, &cfg.cursor_dir, list_files)?;
     let opencode = list_if(opencode_enabled, &cfg.opencode_commands_dir, list_files)?;
-    let codex = list_if(codex_prompts_enabled, &cfg.codex_dir, list_codex_files)?;
+    let codex = list_if(codex_prompts_read_enabled, &cfg.codex_dir, list_codex_files)?;
     let central = if cfg.central_dir.exists() {
         list_files(&cfg.central_dir)?
     } else {
@@ -89,7 +108,7 @@ pub(crate) fn sync_commands_with_mode(
             (TOOL_CLAUDE, claude_enabled, &cfg.claude_dir),
             (TOOL_CURSOR, cursor_enabled, &cfg.cursor_dir),
             (TOOL_OPENCODE, opencode_enabled, &cfg.opencode_commands_dir),
-            (TOOL_CODEX, codex_prompts_enabled, &cfg.codex_dir),
+            (TOOL_CODEX, codex_prompts_write_enabled, &cfg.codex_dir),
         ] {
             if !enabled {
                 continue;
@@ -126,6 +145,7 @@ pub(crate) fn sync_commands_with_mode(
                 log_mode,
                 mode,
                 history,
+                reserved_codex_skill_names,
             )?;
             stats.updated += usize::from(updated);
         }
@@ -137,6 +157,7 @@ pub(crate) fn sync_commands_with_mode(
 mod tests {
     use super::*;
     use crate::sync::test_support::{doc, read_body, read_frontmatter, setup, write_plain};
+    use std::collections::HashSet;
     use std::fs;
 
     #[test]
@@ -285,6 +306,29 @@ mod tests {
     }
 
     #[test]
+    fn sync_commands_reserved_codex_skill_name_skips_wrapper() -> io::Result<()> {
+        let (_tmp, cfg) = setup()?;
+
+        write_plain(&cfg.central_dir.join("review.md"), "Review command body.")?;
+
+        let mut history = None;
+        let mut conflicts = Vec::new();
+        let reserved = HashSet::from(["review".to_string()]);
+        sync_commands_with_reserved_codex_skill_names(
+            &cfg,
+            LogMode::Quiet,
+            ExecutionMode::Apply,
+            &mut history,
+            &mut conflicts,
+            &reserved,
+        )?;
+
+        assert!(!cfg.codex_skills_dir.join("review/SKILL.md").exists());
+        assert!(cfg.codex_dir.join("review.md").exists());
+        Ok(())
+    }
+
+    #[test]
     fn sync_commands_blacklist_skips_tool_but_syncs_others() -> io::Result<()> {
         let (_tmp, mut cfg) = setup()?;
 
@@ -341,22 +385,25 @@ mod tests {
     }
 
     #[test]
-    fn sync_commands_ignores_stale_codex_prompts_when_version_unsupported() -> io::Result<()> {
+    fn sync_commands_reads_existing_codex_prompts_when_version_unsupported() -> io::Result<()> {
         let (_tmp, mut cfg) = setup()?;
         cfg.verified_versions
             .insert(TOOL_CODEX.to_string(), "0.117.0".to_string());
 
-        let claude = cfg.claude_dir.join("review.md");
         let codex = cfg.codex_dir.join("review.md");
-        write_plain(&claude, &doc("claude", "Claude body"))?;
-        write_plain(&codex, &doc("codex", "Stale codex prompt"))?;
-        crate::sync::test_support::set_mtime(&codex, 9_000_000_000)?;
+        write_plain(&codex, &doc("codex", "Legacy codex prompt"))?;
 
         sync_commands(&cfg, LogMode::Quiet)?;
 
-        assert_eq!(read_body(&claude)?, "Claude body");
-        assert_eq!(read_body(&cfg.central_dir.join("review.md"))?, "Claude body");
-        assert!(cfg.codex_skills_dir.join("review/SKILL.md").exists());
+        assert_eq!(
+            read_body(&cfg.central_dir.join("review.md"))?,
+            "Legacy codex prompt"
+        );
+        assert_eq!(
+            read_body(&cfg.codex_skills_dir.join("review/SKILL.md"))?,
+            "Legacy codex prompt"
+        );
+        assert_eq!(read_body(&codex)?, "Legacy codex prompt");
         Ok(())
     }
 

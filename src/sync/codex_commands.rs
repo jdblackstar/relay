@@ -2,6 +2,7 @@ use super::shared::{log_action, merge_frontmatter, write_raw_if_changed, Markdow
 use super::{ExecutionMode, LogMode};
 use crate::history::HistoryRecorder;
 use crate::markers::{is_relay_generated_command_skill, RELAY_COMMAND_SKILL_MARKER};
+use std::collections::HashSet;
 use std::fs;
 use std::io;
 use std::path::Path;
@@ -25,6 +26,7 @@ pub(crate) fn sync_codex_command_skill_wrapper(
     log_mode: LogMode,
     mode: ExecutionMode,
     history: &mut Option<HistoryRecorder>,
+    reserved_skill_names: &HashSet<String>,
 ) -> io::Result<bool> {
     let Some(skill_name) = command_skill_name(command_name) else {
         return Ok(false);
@@ -33,6 +35,14 @@ pub(crate) fn sync_codex_command_skill_wrapper(
     let skill_path = skill_dir.join("SKILL.md");
     let marker_path = skill_dir.join(RELAY_COMMAND_SKILL_MARKER);
     let label = format!("commands: codex skill {}", skill_path.display());
+
+    if reserved_skill_names.contains(skill_name) {
+        log_action(
+            log_mode,
+            &format!("{label}: skipped; real skill owns this name"),
+        );
+        return Ok(false);
+    }
 
     if skill_dir.exists() && !is_relay_generated_command_skill(&skill_dir) {
         log_action(
