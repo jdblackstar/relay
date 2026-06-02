@@ -18,6 +18,12 @@ if ! command -v cargo >/dev/null 2>&1; then
     exit 127
 fi
 
+if command -v rustup >/dev/null 2>&1 \
+    && ! rustup show active-toolchain >/dev/null 2>&1 \
+    && [[ -z "${RUSTUP_TOOLCHAIN:-}" ]]; then
+    export RUSTUP_TOOLCHAIN=stable
+fi
+
 wait_for_file() {
     local path="$1"
     local log_path="$2"
@@ -63,24 +69,24 @@ for bin in codex claude opencode; do
     fi
 done
 
-"${REPO_ROOT}/scripts/smoke-seed.sh"
+"${REPO_ROOT}/scripts/seed-sandbox.sh"
 
 cargo build
 "$RELAY_BIN" sync --verbose
 
-test -f "$HOME/.config/relay/commands/codex-smoke.md"
-test -f "$HOME/.config/relay/commands/claude-smoke.md"
-test -f "$HOME/.config/relay/commands/opencode-smoke.md"
-test -d "$HOME/.config/relay/skills/codex-smoke"
-test -d "$HOME/.config/relay/skills/claude-smoke"
-test -d "$HOME/.config/relay/skills/opencode-smoke"
+test -f "$HOME/.config/relay/commands/codex-sandbox.md"
+test -f "$HOME/.config/relay/commands/claude-sandbox.md"
+test -f "$HOME/.config/relay/commands/opencode-sandbox.md"
+test -d "$HOME/.config/relay/skills/codex-sandbox"
+test -d "$HOME/.config/relay/skills/claude-sandbox"
+test -d "$HOME/.config/relay/skills/opencode-sandbox"
 test -f "$HOME/.config/relay/agents/codex/AGENTS.md"
 test -f "$HOME/.config/relay/agents/opencode/AGENTS.md"
 test -f "$HOME/.config/relay/rules/codex/default.rules"
 
-assert_codex_command_skill_wrapper "claude-smoke" "Claude smoke command."
-assert_codex_command_skill_wrapper "cursor-smoke" "Cursor smoke command."
-assert_codex_command_skill_wrapper "opencode-smoke" "OpenCode smoke command."
+assert_codex_command_skill_wrapper "claude-sandbox" "Claude sandbox command."
+assert_codex_command_skill_wrapper "cursor-sandbox" "Cursor sandbox command."
+assert_codex_command_skill_wrapper "opencode-sandbox" "OpenCode sandbox command."
 
 watch_log="$(mktemp)"
 "$RELAY_BIN" watch --quiet --debounce-ms "$WATCH_DEBOUNCE_MS" >"$watch_log" 2>&1 &
@@ -120,10 +126,10 @@ write_test_file() {
     local attempts=3
     local i
     for ((i = 0; i < attempts; i++)); do
-        cat <<'EOF' > "$CLAUDE_HOME/commands/watch-smoke.md"
-Claude watch smoke command.
+        cat <<'EOF' > "$CLAUDE_HOME/commands/watch-e2e.md"
+Claude watch e2e command.
 EOF
-        if wait_for_file "$HOME/.config/relay/commands/watch-smoke.md" "$watch_log"; then
+        if wait_for_file "$HOME/.config/relay/commands/watch-e2e.md" "$watch_log"; then
             return 0
         fi
         if [[ $i -lt $((attempts - 1)) ]]; then
@@ -134,25 +140,25 @@ EOF
 }
 
 if ! write_test_file; then
-    echo "error: failed to write watch smoke file after retries" >&2
+    echo "error: failed to write watch e2e file after retries" >&2
     kill "$watch_pid" >/dev/null 2>&1 || true
     wait "$watch_pid" >/dev/null 2>&1 || true
     rm -f "$watch_log"
     exit 1
 fi
 
-wait_for_file "$CODEX_HOME/skills/watch-smoke/SKILL.md" "$watch_log"
-wait_for_file "$OPENCODE_HOME/command/watch-smoke.md" "$watch_log"
+wait_for_file "$CODEX_HOME/skills/watch-e2e/SKILL.md" "$watch_log"
+wait_for_file "$OPENCODE_HOME/command/watch-e2e.md" "$watch_log"
 
-if ! grep -q "Claude watch smoke command." "$HOME/.config/relay/commands/watch-smoke.md"; then
-    echo "error: watch smoke content missing in central" >&2
+if ! grep -q "Claude watch e2e command." "$HOME/.config/relay/commands/watch-e2e.md"; then
+    echo "error: watch e2e content missing in central" >&2
     exit 1
 fi
 
-assert_codex_command_skill_wrapper "watch-smoke" "Claude watch smoke command."
+assert_codex_command_skill_wrapper "watch-e2e" "Claude watch e2e command."
 
-if ! grep -q "Claude watch smoke command." "$OPENCODE_HOME/command/watch-smoke.md"; then
-    echo "error: watch smoke content missing in opencode" >&2
+if ! grep -q "Claude watch e2e command." "$OPENCODE_HOME/command/watch-e2e.md"; then
+    echo "error: watch e2e content missing in opencode" >&2
     exit 1
 fi
 
@@ -160,4 +166,4 @@ kill "$watch_pid" >/dev/null 2>&1 || true
 wait "$watch_pid" >/dev/null 2>&1 || true
 rm -f "$watch_log"
 
-echo "smoke test ok"
+echo "e2e test ok"

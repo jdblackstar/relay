@@ -12,7 +12,7 @@ The script will:
 3. Run validation in an isolated sandbox:
    - `cargo test`
    - `cargo clippy --all-targets --all-features -- -D warnings`
-   - `./scripts/compat-smoke.sh`
+   - `./scripts/compat-e2e.sh`
 4. If versions changed, create/update a branch and open a PR with `gh`.
 5. If any step fails, create a GitHub issue with failure details.
 

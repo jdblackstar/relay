@@ -399,9 +399,9 @@ run_validation_suite() {
     log "running cargo clippy"
     cargo clippy --all-targets --all-features -- -D warnings
 
-    set_context "validation:compat-smoke" "" "./scripts/compat-smoke.sh"
-    log "running compatibility smoke checks"
-    ./scripts/compat-smoke.sh
+    set_context "validation:compat-e2e" "" "./scripts/compat-e2e.sh"
+    log "running compatibility e2e checks"
+    ./scripts/compat-e2e.sh
 }
 
 ensure_git_clean() {
@@ -468,7 +468,7 @@ build_pr_body() {
         echo "Validation run:"
         echo "- \`cargo test\`"
         echo "- \`cargo clippy --all-targets --all-features -- -D warnings\`"
-        echo "- \`./scripts/compat-smoke.sh\`"
+        echo "- \`./scripts/compat-e2e.sh\`"
         echo
         echo "Updated file:"
         echo "- \`${COMPAT_VERSION_FILE}\` (\`[tested_latest]\` refreshed; \`[min_supported]\` preserved)"

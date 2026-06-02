@@ -68,7 +68,7 @@ mod tests {
     }
 
     #[test]
-    fn print_conflict_summary_smoke() {
+    fn print_conflict_summary_renders() {
         let conflicts = vec![
             SyncConflict {
                 kind: SyncItemKind::Command,

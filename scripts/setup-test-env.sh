@@ -6,16 +6,65 @@ ENV_NAME="${1:-staging}"
 BASE_DIR="${REPO_ROOT}/.local/test-envs/${ENV_NAME}"
 HOME_DIR="${BASE_DIR}/home"
 ENV_FILE="${BASE_DIR}/env.sh"
+CONFIG_FILE="${HOME_DIR}/.config/relay/config.toml"
+BIN_DIR="${BASE_DIR}/bin"
 
 mkdir -p \
-  "${HOME_DIR}/.config" \
+  "${BIN_DIR}" \
+  "${HOME_DIR}/.config/relay/commands" \
+  "${HOME_DIR}/.config/relay/skills" \
+  "${HOME_DIR}/.config/relay/agents" \
+  "${HOME_DIR}/.config/relay/rules" \
   "${HOME_DIR}/.claude/commands" \
   "${HOME_DIR}/.claude/skills" \
   "${HOME_DIR}/.codex/prompts" \
   "${HOME_DIR}/.codex/skills" \
   "${HOME_DIR}/.codex/rules" \
+  "${HOME_DIR}/.cursor/commands" \
   "${HOME_DIR}/.config/opencode/command" \
   "${HOME_DIR}/.config/opencode/skill"
+
+cat > "${BIN_DIR}/codex" <<'EOF'
+#!/usr/bin/env bash
+echo "codex-cli 0.135.0"
+EOF
+
+cat > "${BIN_DIR}/claude" <<'EOF'
+#!/usr/bin/env bash
+echo "2.1.119 (Claude Code)"
+EOF
+
+cat > "${BIN_DIR}/cursor" <<'EOF'
+#!/usr/bin/env bash
+echo "2.5.20"
+EOF
+
+cat > "${BIN_DIR}/opencode" <<'EOF'
+#!/usr/bin/env bash
+echo "1.2.10"
+EOF
+
+chmod +x "${BIN_DIR}/codex" "${BIN_DIR}/claude" "${BIN_DIR}/cursor" "${BIN_DIR}/opencode"
+
+cat > "${CONFIG_FILE}" <<EOF
+enabled_tools = ["claude", "codex", "cursor", "opencode"]
+verified_versions = {}
+blacklist = {}
+central_dir = "${HOME_DIR}/.config/relay/commands"
+central_skills_dir = "${HOME_DIR}/.config/relay/skills"
+central_agents_dir = "${HOME_DIR}/.config/relay/agents"
+central_rules_dir = "${HOME_DIR}/.config/relay/rules"
+claude_dir = "${HOME_DIR}/.claude/commands"
+claude_skills_dir = "${HOME_DIR}/.claude/skills"
+cursor_dir = "${HOME_DIR}/.cursor/commands"
+opencode_commands_dir = "${HOME_DIR}/.config/opencode/command"
+opencode_skills_dir = "${HOME_DIR}/.config/opencode/skill"
+opencode_agents_file = "${HOME_DIR}/.config/opencode/AGENTS.md"
+codex_dir = "${HOME_DIR}/.codex/prompts"
+codex_skills_dir = "${HOME_DIR}/.codex/skills"
+codex_rules_file = "${HOME_DIR}/.codex/rules/default.rules"
+codex_agents_file = "${HOME_DIR}/.codex/AGENTS.md"
+EOF
 
 cat > "${ENV_FILE}" <<EOF
 export RELAY_REPO_ROOT="${REPO_ROOT}"
@@ -25,7 +74,13 @@ export CODEX_HOME="${HOME_DIR}/.codex"
 export CLAUDE_HOME="${HOME_DIR}/.claude"
 export OPENCODE_HOME="${HOME_DIR}/.config/opencode"
 export CURSOR_HOME="${HOME_DIR}/.cursor"
-export PATH="${REPO_ROOT}/target/debug:\$PATH"
+export PATH="${REPO_ROOT}/target/debug:${BIN_DIR}:\$PATH"
+
+if command -v rustup >/dev/null 2>&1 \
+  && ! rustup show active-toolchain >/dev/null 2>&1 \
+  && [[ -z "\${RUSTUP_TOOLCHAIN:-}" ]]; then
+  export RUSTUP_TOOLCHAIN=stable
+fi
 
 if ! command -v relay >/dev/null 2>&1; then
   relay() {
@@ -36,6 +91,7 @@ EOF
 
 echo "Test environment created:"
 echo "  ${BASE_DIR}"
+echo "  config: ${CONFIG_FILE}"
 echo
 echo "Activate it with:"
 echo "  source ${ENV_FILE}"
@@ -45,5 +101,5 @@ echo "  relay sync --plan --verbose"
 echo "  relay sync --apply --verbose"
 echo "  relay watch --quiet"
 echo
-echo "Or start the interactive smoke shell (fixtures + helpers):"
-echo "  ./scripts/smoke-interactive.sh"
+echo "Or start the interactive sandbox (fixtures + helpers):"
+echo "  ./scripts/sandbox.sh"
