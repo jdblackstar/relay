@@ -58,7 +58,11 @@ pub(crate) fn sync_commands_with_reserved_codex_skill_names(
     let codex_prompts_read_enabled = codex_enabled && cfg.codex_dir.exists();
     let codex_prompts_write_enabled =
         codex_prompts_read_enabled && codex_supports_custom_prompts(cfg);
-    let codex_skills_enabled = codex_enabled && cfg.codex_skills_dir.exists();
+    let codex_skills_enabled = codex_enabled
+        && cfg
+            .codex_skills_dir
+            .parent()
+            .is_some_and(|parent| parent.exists());
 
     let claude = list_if(claude_enabled, &cfg.claude_dir, list_files)?;
     let cursor = list_if(cursor_enabled, &cfg.cursor_dir, list_files)?;
@@ -405,6 +409,25 @@ mod tests {
             "Legacy codex prompt"
         );
         assert_eq!(read_body(&codex)?, "Legacy codex prompt");
+        Ok(())
+    }
+
+    #[test]
+    fn sync_commands_creates_codex_skill_dir_when_missing() -> io::Result<()> {
+        let (_tmp, mut cfg) = setup()?;
+        cfg.verified_versions
+            .insert(TOOL_CODEX.to_string(), "0.117.0".to_string());
+        fs::remove_dir_all(&cfg.codex_skills_dir)?;
+
+        let codex = cfg.codex_dir.join("review.md");
+        write_plain(&codex, &doc("codex", "Legacy codex prompt"))?;
+
+        sync_commands(&cfg, LogMode::Quiet)?;
+
+        assert_eq!(
+            read_body(&cfg.codex_skills_dir.join("review/SKILL.md"))?,
+            "Legacy codex prompt"
+        );
         Ok(())
     }
 
