@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- [codex] Add Codex command skill wrappers ([#18](https://github.com/jdblackstar/relay/pull/18))
 - [codex] Check Cursor CLI version ([#17](https://github.com/jdblackstar/relay/pull/17))
 
 ## [0.2.3] - 2026-04-29
