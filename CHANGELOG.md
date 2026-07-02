@@ -9,8 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+
+## [0.2.4] - 2026-07-02
+
+### Added
+
 - [codex] Add Codex command skill wrappers ([#18](https://github.com/jdblackstar/relay/pull/18))
 - [codex] Check Cursor CLI version ([#17](https://github.com/jdblackstar/relay/pull/17))
+
 
 ## [0.2.3] - 2026-04-29
 
@@ -41,5 +47,6 @@ Initial tracked release; earlier history is in git.
 
 [0.2.2]: https://github.com/jdblackstar/relay/compare/v0.2.1...v0.2.2
 [0.2.3]: https://github.com/jdblackstar/relay/compare/v0.2.2...v0.2.3
-[Unreleased]: https://github.com/jdblackstar/relay/compare/v0.2.3...HEAD
+[0.2.4]: https://github.com/jdblackstar/relay/compare/v0.2.3...v0.2.4
+[Unreleased]: https://github.com/jdblackstar/relay/compare/v0.2.4...HEAD
 [0.2.1]: https://github.com/jdblackstar/relay/releases/tag/v0.2.1
