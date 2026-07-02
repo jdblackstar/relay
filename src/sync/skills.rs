@@ -67,10 +67,11 @@ pub(crate) fn sync_skills_with_mode(
     let claude_enabled = cfg.tool_enabled(TOOL_CLAUDE) && cfg.claude_skills_dir.exists();
     let opencode_enabled = cfg.tool_enabled(TOOL_OPENCODE) && cfg.opencode_skills_dir.exists();
     let codex_enabled = codex_skills_target_enabled(cfg);
+    let codex_read_enabled = cfg.tool_enabled(TOOL_CODEX) && cfg.codex_skills_dir.exists();
 
     let claude = list_if(claude_enabled, &cfg.claude_skills_dir, list_skill_dirs)?;
     let opencode = list_if(opencode_enabled, &cfg.opencode_skills_dir, list_skill_dirs)?;
-    let codex = list_if(codex_enabled, &cfg.codex_skills_dir, list_skill_dirs)?;
+    let codex = list_if(codex_read_enabled, &cfg.codex_skills_dir, list_skill_dirs)?;
     let central = if cfg.central_skills_dir.exists() {
         list_skill_dirs(&cfg.central_skills_dir)?
     } else {
