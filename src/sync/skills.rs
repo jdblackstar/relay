@@ -6,8 +6,9 @@ use super::shared::{
 use super::{ExecutionMode, LogMode as SyncLogMode, SyncConflict, SyncItemKind, SyncStats};
 use crate::config::{Config, TOOL_CLAUDE, TOOL_CODEX, TOOL_OPENCODE};
 use crate::history::HistoryRecorder;
+use crate::markers::is_relay_generated_command_skill;
 use std::collections::hash_map::DefaultHasher;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
 use std::hash::{Hash, Hasher};
@@ -65,11 +66,12 @@ pub(crate) fn sync_skills_with_mode(
 
     let claude_enabled = cfg.tool_enabled(TOOL_CLAUDE) && cfg.claude_skills_dir.exists();
     let opencode_enabled = cfg.tool_enabled(TOOL_OPENCODE) && cfg.opencode_skills_dir.exists();
-    let codex_enabled = cfg.tool_enabled(TOOL_CODEX) && cfg.codex_skills_dir.exists();
+    let codex_enabled = codex_skills_target_enabled(cfg);
+    let codex_read_enabled = cfg.tool_enabled(TOOL_CODEX) && cfg.codex_skills_dir.exists();
 
     let claude = list_if(claude_enabled, &cfg.claude_skills_dir, list_skill_dirs)?;
     let opencode = list_if(opencode_enabled, &cfg.opencode_skills_dir, list_skill_dirs)?;
-    let codex = list_if(codex_enabled, &cfg.codex_skills_dir, list_skill_dirs)?;
+    let codex = list_if(codex_read_enabled, &cfg.codex_skills_dir, list_skill_dirs)?;
     let central = if cfg.central_skills_dir.exists() {
         list_skill_dirs(&cfg.central_skills_dir)?
     } else {
@@ -131,6 +133,48 @@ pub(crate) fn sync_skills_with_mode(
     }
 
     Ok(stats)
+}
+
+pub(super) fn codex_real_skill_names(cfg: &Config) -> io::Result<HashSet<String>> {
+    let mut names = HashSet::new();
+    if !codex_skills_target_enabled(cfg) {
+        return Ok(names);
+    }
+
+    if cfg.codex_skills_dir.exists() {
+        names.extend(list_skill_dirs(&cfg.codex_skills_dir)?.into_keys());
+    }
+
+    for (enabled, dir) in [
+        (cfg.central_skills_dir.exists(), &cfg.central_skills_dir),
+        (
+            cfg.tool_enabled(TOOL_CLAUDE) && cfg.claude_skills_dir.exists(),
+            &cfg.claude_skills_dir,
+        ),
+        (
+            cfg.tool_enabled(TOOL_OPENCODE) && cfg.opencode_skills_dir.exists(),
+            &cfg.opencode_skills_dir,
+        ),
+    ] {
+        if !enabled {
+            continue;
+        }
+        for name in list_skill_dirs(dir)?.into_keys() {
+            if !cfg.is_blacklisted(&format!("skills/{name}"), TOOL_CODEX) {
+                names.insert(name);
+            }
+        }
+    }
+
+    Ok(names)
+}
+
+pub(super) fn codex_skills_target_enabled(cfg: &Config) -> bool {
+    cfg.tool_enabled(TOOL_CODEX)
+        && cfg
+            .codex_skills_dir
+            .parent()
+            .is_some_and(|parent| parent.exists())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -257,7 +301,10 @@ fn list_skill_dirs(dir: &Path) -> io::Result<HashMap<String, PathBuf>> {
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
         if let Some((name, path, meta)) = read_visible_entry(entry, true)? {
-            if meta.is_dir() && path.join("SKILL.md").exists() {
+            if meta.is_dir()
+                && path.join("SKILL.md").exists()
+                && !is_relay_generated_command_skill(&path)
+            {
                 out.insert(name, path);
             }
         }
@@ -373,6 +420,7 @@ fn skill_temp_path(target: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::markers::RELAY_COMMAND_SKILL_MARKER;
     use crate::sync::test_support::{doc, setup, write_plain, write_skill};
     use tempfile::TempDir;
 
@@ -461,6 +509,21 @@ mod tests {
     }
 
     #[test]
+    fn sync_skills_creates_missing_codex_skills_dir() -> io::Result<()> {
+        let (_tmp, cfg) = setup()?;
+        fs::remove_dir_all(&cfg.codex_skills_dir)?;
+        write_skill(&cfg.central_skills_dir, "plan", &doc("central", "Body"))?;
+
+        sync_skills(&cfg, SyncLogMode::Quiet)?;
+
+        assert_eq!(
+            read_markdown(&cfg.codex_skills_dir.join("plan/SKILL.md"))?.body,
+            "Body"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn sync_skills_blacklist_skips_tool_but_syncs_others() -> io::Result<()> {
         let (_tmp, mut cfg) = setup()?;
 
@@ -512,11 +575,14 @@ mod tests {
         fs::create_dir_all(&missing)?;
         let _valid = write_skill(&dir, "valid", "skill")?;
         let _hidden = write_skill(&dir, ".hidden", "hidden")?;
+        let generated = write_skill(&dir, "generated", "generated")?;
+        write_plain(&generated.join(RELAY_COMMAND_SKILL_MARKER), "generated")?;
         write_plain(&dir.join("notadir"), "file")?;
 
         let list = list_skill_dirs(&dir)?;
         assert!(list.contains_key("valid"));
         assert!(!list.contains_key("missing"));
+        assert!(!list.contains_key("generated"));
         Ok(())
     }
 

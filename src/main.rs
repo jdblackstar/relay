@@ -5,6 +5,7 @@ mod daemon;
 mod history;
 mod init;
 mod logging;
+mod markers;
 mod process_lock;
 mod report;
 mod sync;
@@ -191,9 +192,28 @@ fn confirm_versions_or_continue(
     cfg: &config::Config,
     confirm_versions: bool,
 ) -> std::io::Result<bool> {
-    let mismatch = versions::check_versions(cfg);
-    if mismatch && confirm_versions {
-        return versions::confirm_version_mismatch();
+    confirm_versions_or_continue_with(
+        confirm_versions,
+        || versions::check_versions(cfg),
+        versions::confirm_version_mismatch,
+    )
+}
+
+#[cfg_attr(test, allow(dead_code))]
+fn confirm_versions_or_continue_with<C, P>(
+    confirm_versions: bool,
+    check_versions: C,
+    confirm_mismatch: P,
+) -> std::io::Result<bool>
+where
+    C: FnOnce() -> bool,
+    P: FnOnce() -> std::io::Result<bool>,
+{
+    if !confirm_versions {
+        return Ok(true);
+    }
+    if check_versions() {
+        return confirm_mismatch();
     }
     Ok(true)
 }
@@ -579,11 +599,24 @@ mod tests {
             Commands::Sync {
                 fail_on_conflict,
                 plan,
+                confirm_versions,
                 ..
             } => {
                 assert!(fail_on_conflict);
                 assert!(!plan);
+                assert!(!confirm_versions);
             }
+            _ => panic!("expected sync command"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_sync_confirm_versions() {
+        let cli = Cli::try_parse_from(["relay", "sync", "--confirm-versions"]).unwrap();
+        match cli.command {
+            Commands::Sync {
+                confirm_versions, ..
+            } => assert!(confirm_versions),
             _ => panic!("expected sync command"),
         }
     }
@@ -645,6 +678,30 @@ mod tests {
             ]
         );
         assert_eq!(outcome.report.commands.updated, 1);
+    }
+
+    #[test]
+    fn confirm_versions_gate_skips_version_probe_by_default() {
+        let mut checked = false;
+        let result = super::confirm_versions_or_continue_with(
+            false,
+            || {
+                checked = true;
+                true
+            },
+            || Ok(false),
+        )
+        .unwrap();
+
+        assert!(result);
+        assert!(!checked);
+    }
+
+    #[test]
+    fn confirm_versions_gate_prompts_on_mismatch_when_requested() {
+        let result = super::confirm_versions_or_continue_with(true, || true, || Ok(false)).unwrap();
+
+        assert!(!result);
     }
 
     #[test]

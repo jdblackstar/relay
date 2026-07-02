@@ -579,7 +579,6 @@ mod tests {
             opencode_commands_dir: tmp.path().join("opencode/command"),
             opencode_skills_dir: tmp.path().join("opencode/skill"),
             opencode_agents_file: tmp.path().join("opencode/AGENTS.md"),
-            codex_dir: tmp.path().join("codex/prompts"),
             codex_skills_dir: tmp.path().join("codex/skills"),
             codex_rules_file: tmp.path().join("codex/rules/default.rules"),
             codex_agents_file: tmp.path().join("codex/AGENTS.md"),

@@ -72,7 +72,6 @@ fn classify_origin(cfg: &Config, path: &Path) -> Option<String> {
         ("central_rules", &cfg.central_rules_dir),
         ("claude", &cfg.claude_dir),
         ("claude_skills", &cfg.claude_skills_dir),
-        ("codex", &cfg.codex_dir),
         ("codex_skills", &cfg.codex_skills_dir),
         ("opencode", &cfg.opencode_commands_dir),
         ("opencode_skills", &cfg.opencode_skills_dir),
@@ -233,7 +232,6 @@ mod tests {
             opencode_commands_dir: tmp.path().join("opencode_commands"),
             opencode_skills_dir: tmp.path().join("opencode_skills"),
             opencode_agents_file: tmp.path().join("opencode_agents/AGENTS.md"),
-            codex_dir: tmp.path().join("codex_prompts"),
             codex_skills_dir: tmp.path().join("codex_skills"),
             codex_rules_file: tmp.path().join("codex_rules/default.rules"),
             codex_agents_file: tmp.path().join("codex_agents/AGENTS.md"),
@@ -253,7 +251,6 @@ mod tests {
         fs::create_dir_all(&cfg.opencode_commands_dir)?;
         fs::create_dir_all(&cfg.opencode_skills_dir)?;
         fs::create_dir_all(cfg.opencode_agents_file.parent().unwrap())?;
-        fs::create_dir_all(&cfg.codex_dir)?;
         fs::create_dir_all(&cfg.codex_skills_dir)?;
         fs::create_dir_all(cfg.codex_rules_file.parent().unwrap())?;
         fs::create_dir_all(cfg.codex_agents_file.parent().unwrap())?;
@@ -274,7 +271,6 @@ mod tests {
             cfg.opencode_agents_file.parent().unwrap().to_path_buf(),
             RecursiveMode::NonRecursive
         )));
-        assert!(paths.contains(&(cfg.codex_dir.clone(), RecursiveMode::NonRecursive)));
         assert!(paths.contains(&(cfg.codex_skills_dir.clone(), RecursiveMode::Recursive)));
         assert!(paths.contains(&(
             cfg.codex_rules_file.parent().unwrap().to_path_buf(),
@@ -302,11 +298,11 @@ mod tests {
     }
 
     #[test]
-    fn watch_origin_marks_codex_path() -> io::Result<()> {
+    fn watch_origin_marks_codex_skills_path() -> io::Result<()> {
         let tmp = TempDir::new()?;
         let cfg = make_config(&tmp);
-        let origin = watch_origin(&cfg, &[cfg.codex_dir.join("review.md")]);
-        assert_eq!(origin, "watch:codex:review.md");
+        let origin = watch_origin(&cfg, &[cfg.codex_skills_dir.join("review/SKILL.md")]);
+        assert_eq!(origin, "watch:codex_skills:review/SKILL.md");
         Ok(())
     }
 

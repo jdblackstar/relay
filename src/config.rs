@@ -26,7 +26,6 @@ pub(crate) struct Config {
     pub opencode_commands_dir: PathBuf,
     pub opencode_skills_dir: PathBuf,
     pub opencode_agents_file: PathBuf,
-    pub codex_dir: PathBuf,
     pub codex_skills_dir: PathBuf,
     pub codex_rules_file: PathBuf,
     pub codex_agents_file: PathBuf,
@@ -48,7 +47,6 @@ struct PartialConfig {
     pub opencode_dir: Option<PathBuf>,
     pub opencode_skills_dir: Option<PathBuf>,
     pub opencode_agents_file: Option<PathBuf>,
-    pub codex_dir: Option<PathBuf>,
     pub codex_skills_dir: Option<PathBuf>,
     pub codex_rules_file: Option<PathBuf>,
     pub codex_agents_file: Option<PathBuf>,
@@ -94,7 +92,6 @@ impl Config {
             opencode_commands_dir: opencode_root.join("command"),
             opencode_skills_dir: opencode_root.join("skill"),
             opencode_agents_file: opencode_root.join("AGENTS.md"),
-            codex_dir: codex_root.join("prompts"),
             codex_skills_dir: codex_root.join("skills"),
             codex_rules_file: codex_root.join("rules/default.rules"),
             codex_agents_file: codex_root.join("AGENTS.md"),
@@ -200,7 +197,6 @@ impl Config {
             opencode_agents_file: cfg
                 .opencode_agents_file
                 .unwrap_or(defaults.opencode_agents_file),
-            codex_dir: cfg.codex_dir.unwrap_or(defaults.codex_dir),
             codex_skills_dir: cfg.codex_skills_dir.unwrap_or(defaults.codex_skills_dir),
             codex_rules_file: cfg.codex_rules_file.unwrap_or(defaults.codex_rules_file),
             codex_agents_file: cfg.codex_agents_file.unwrap_or(defaults.codex_agents_file),
@@ -406,7 +402,6 @@ fn normalize_partial_config_paths(mut cfg: PartialConfig) -> io::Result<PartialC
         opencode_dir,
         opencode_skills_dir,
         opencode_agents_file,
-        codex_dir,
         codex_skills_dir,
         codex_rules_file,
         codex_agents_file,
@@ -640,7 +635,6 @@ mod tests {
             opencode_commands_dir: PathBuf::from("/tmp/oc"),
             opencode_skills_dir: PathBuf::from("/tmp/os"),
             opencode_agents_file: PathBuf::from("/tmp/oa"),
-            codex_dir: PathBuf::from("/tmp/codex"),
             codex_skills_dir: PathBuf::from("/tmp/codex_skills"),
             codex_rules_file: PathBuf::from("/tmp/rules"),
             codex_agents_file: PathBuf::from("/tmp/agents"),
@@ -685,7 +679,6 @@ mod tests {
 
         let cfg = Config::default_paths()?;
         assert_eq!(cfg.central_dir, home.join(".config/relay/commands"));
-        assert_eq!(cfg.codex_dir, home.join("codex_root/prompts"));
         assert_eq!(cfg.codex_skills_dir, home.join("codex_root/skills"));
         assert_eq!(cfg.claude_dir, home.join("claude_root/commands"));
         assert_eq!(cfg.claude_skills_dir, home.join("claude_root/skills"));
@@ -729,7 +722,7 @@ mod tests {
         assert_eq!(cfg.central_skills_dir, xdg.join("relay/skills"));
         assert_eq!(cfg.central_agents_dir, xdg.join("relay/agents"));
         assert_eq!(cfg.central_rules_dir, xdg.join("relay/rules"));
-        assert_eq!(cfg.codex_dir, xdg.join("codex/prompts"));
+        assert_eq!(cfg.codex_skills_dir, xdg.join("codex/skills"));
         assert_eq!(cfg.claude_dir, home.join(".claude/commands"));
 
         set_env("RELAY_HOME", None);
@@ -754,7 +747,7 @@ mod tests {
         set_env("CODEX_HOME", Some("${XDG_CONFIG_HOME}/codex"));
 
         let cfg = Config::default_paths()?;
-        assert_eq!(cfg.codex_dir, os_home.join(".xdg/codex/prompts"));
+        assert_eq!(cfg.codex_skills_dir, os_home.join(".xdg/codex/skills"));
 
         set_env("RELAY_HOME", None);
         set_env("XDG_CONFIG_HOME", None);
@@ -1100,7 +1093,7 @@ central_dir = "${UNSUPPORTED_VAR}/relay/commands"
         set_env("CODEX_HOME", Some("/tmp/codex"));
 
         let cfg = Config::default_paths()?;
-        assert_eq!(cfg.codex_dir, PathBuf::from("/tmp/codex/prompts"));
+        assert_eq!(cfg.codex_skills_dir, PathBuf::from("/tmp/codex/skills"));
 
         set_env("RELAY_HOME", None);
         set_env("CODEX_HOME", None);

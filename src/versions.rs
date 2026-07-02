@@ -72,13 +72,13 @@ enum VersionStatus {
     Old,
 }
 
-#[derive(Clone, Copy)]
-struct ParsedVersion {
-    major: u64,
-    minor: u64,
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct ParsedVersion {
+    pub major: u64,
+    pub minor: u64,
 }
 
-fn extract_version_token(input: &str) -> Option<String> {
+pub(crate) fn extract_version_token(input: &str) -> Option<String> {
     let mut start = None;
     for (idx, ch) in input.char_indices() {
         if ch.is_ascii_digit() {
@@ -98,7 +98,7 @@ fn extract_version_token(input: &str) -> Option<String> {
     Some(input[start..end].to_string())
 }
 
-fn parse_version(token: &str) -> Option<ParsedVersion> {
+pub(crate) fn parse_version(token: &str) -> Option<ParsedVersion> {
     let mut parts = token.split('.').filter(|part| !part.is_empty());
     let major = parts.next()?.parse::<u64>().ok()?;
     let minor = parts
@@ -178,7 +178,6 @@ mod tests {
             opencode_commands_dir: tmp.path().join("opencode/command"),
             opencode_skills_dir: tmp.path().join("opencode/skill"),
             opencode_agents_file: tmp.path().join("opencode/AGENTS.md"),
-            codex_dir: tmp.path().join("codex/prompts"),
             codex_skills_dir: tmp.path().join("codex/skills"),
             codex_rules_file: tmp.path().join("codex/rules/default.rules"),
             codex_agents_file: tmp.path().join("codex/AGENTS.md"),
@@ -221,7 +220,7 @@ mod tests {
     fn check_versions_runs() -> std::io::Result<()> {
         let tmp = TempDir::new()?;
         let mut cfg = make_config(&tmp);
-        fs::create_dir_all(&cfg.codex_dir)?;
+        fs::create_dir_all(&cfg.codex_skills_dir)?;
         fs::create_dir_all(&cfg.claude_dir)?;
         assert!(!check_versions(&cfg));
         cfg.enabled_tools.clear();
