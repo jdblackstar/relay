@@ -1,13 +1,15 @@
-use super::shared::{log_action, merge_frontmatter, write_raw_if_changed, MarkdownDoc};
+use super::shared::{
+    log_action, merge_frontmatter, read_visible_entry, write_raw_if_changed, MarkdownDoc,
+};
 use super::{ExecutionMode, LogMode};
 use crate::history::HistoryRecorder;
 use crate::markers::{is_relay_generated_command_skill, RELAY_COMMAND_SKILL_MARKER};
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::fs;
 use std::io;
 use std::path::Path;
 
-fn command_skill_name(command_name: &str) -> Option<&str> {
+pub(super) fn command_skill_name(command_name: &str) -> Option<&str> {
     command_name
         .strip_suffix(".md")
         .filter(|name| !name.is_empty())
@@ -72,6 +74,58 @@ pub(crate) fn sync_codex_command_skill_wrapper(
         log_action(log_mode, &format!("{label}: updated"));
     }
     Ok(skill_changed || marker_changed)
+}
+
+pub(crate) fn prune_stale_codex_command_skill_wrappers(
+    codex_skills_dir: &Path,
+    active_command_names: &BTreeSet<String>,
+    log_mode: LogMode,
+    mode: ExecutionMode,
+    history: &mut Option<HistoryRecorder>,
+) -> io::Result<usize> {
+    if !codex_skills_dir.exists() {
+        return Ok(0);
+    }
+
+    let mut removed = 0usize;
+    for entry in fs::read_dir(codex_skills_dir)? {
+        let entry = entry?;
+        let Some((skill_name, skill_dir, meta)) = read_visible_entry(entry, false)? else {
+            continue;
+        };
+        if !meta.is_dir() || !is_relay_generated_command_skill(&skill_dir) {
+            continue;
+        }
+
+        let command_name = format!("{skill_name}.md");
+        if active_command_names.contains(&command_name) {
+            continue;
+        }
+
+        let label = format!("commands: codex skill {}", skill_dir.display());
+        if mode == ExecutionMode::Plan {
+            log_action(log_mode, &format!("{label}: would remove"));
+            removed += 1;
+            continue;
+        }
+
+        let before = history
+            .as_ref()
+            .map(|recorder| recorder.capture_path(&skill_dir))
+            .transpose()?;
+        fs::remove_dir_all(&skill_dir)?;
+        if let Some(recorder) = history.as_mut() {
+            let after = recorder.capture_path(&skill_dir)?;
+            recorder.record_change(
+                &skill_dir,
+                before.unwrap_or_else(crate::history::EntityState::missing),
+                after,
+            );
+        }
+        log_action(log_mode, &format!("{label}: removed"));
+        removed += 1;
+    }
+    Ok(removed)
 }
 
 #[cfg(test)]
