@@ -15,7 +15,7 @@ pub(crate) fn make_config(tmp: &TempDir) -> Config {
             TOOL_CURSOR.to_string(),
             TOOL_OPENCODE.to_string(),
         ],
-        verified_versions: HashMap::from([(TOOL_CODEX.to_string(), "0.116.0".to_string())]),
+        verified_versions: HashMap::new(),
         blacklist: std::collections::HashMap::new(),
         central_dir: tmp.path().join("central"),
         central_skills_dir: tmp.path().join("central_skills"),
@@ -27,7 +27,6 @@ pub(crate) fn make_config(tmp: &TempDir) -> Config {
         opencode_commands_dir: tmp.path().join("opencode_commands"),
         opencode_skills_dir: tmp.path().join("opencode_skills"),
         opencode_agents_file: tmp.path().join("opencode_agents/AGENTS.md"),
-        codex_dir: tmp.path().join("codex_prompts"),
         codex_skills_dir: tmp.path().join("codex_skills"),
         codex_rules_file: tmp.path().join("codex_rules/default.rules"),
         codex_agents_file: tmp.path().join("codex_agents/AGENTS.md"),
@@ -41,7 +40,6 @@ pub(crate) fn ensure_tool_dirs(cfg: &Config) -> io::Result<()> {
         &cfg.cursor_dir,
         &cfg.opencode_commands_dir,
         &cfg.opencode_skills_dir,
-        &cfg.codex_dir,
         &cfg.codex_skills_dir,
     ] {
         fs::create_dir_all(dir)?;

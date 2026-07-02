@@ -1,4 +1,4 @@
-use crate::config::{Config, TOOL_CODEX};
+use crate::config::Config;
 use crate::tools::{tool_detected, TOOL_DEFINITIONS};
 use console::style;
 
@@ -6,12 +6,6 @@ use console::style;
 use dialoguer::{theme::ColorfulTheme, Confirm};
 #[cfg(not(any(test, coverage)))]
 use std::process::Command;
-
-/// Codex removed custom prompt discovery in 0.117.0 (Mar 2026).
-pub(crate) const CODEX_CUSTOM_PROMPTS_REMOVED_AT: ParsedVersion = ParsedVersion {
-    major: 0,
-    minor: 117,
-};
 
 pub(crate) fn check_versions(cfg: &Config) -> bool {
     let mut mismatch = false;
@@ -114,43 +108,6 @@ pub(crate) fn parse_version(token: &str) -> Option<ParsedVersion> {
     Some(ParsedVersion { major, minor })
 }
 
-pub(crate) fn version_at_least(actual: ParsedVersion, minimum: ParsedVersion) -> bool {
-    actual >= minimum
-}
-
-pub(crate) fn resolve_tool_version(cfg: &Config, tool: &str, bin: &str) -> Option<ParsedVersion> {
-    detect_tool_version(bin).or_else(|| {
-        cfg.verified_version(tool).and_then(|verified| {
-            let token = extract_version_token(verified).unwrap_or_else(|| verified.to_string());
-            parse_version(&token)
-        })
-    })
-}
-
-pub(crate) fn codex_supports_custom_prompts(cfg: &Config) -> bool {
-    resolve_tool_version(cfg, TOOL_CODEX, "codex")
-        .is_some_and(|version| !version_at_least(version, CODEX_CUSTOM_PROMPTS_REMOVED_AT))
-}
-
-#[cfg(not(any(test, coverage)))]
-fn detect_tool_version(bin: &str) -> Option<ParsedVersion> {
-    let output = Command::new(bin).arg("--version").output().ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if version.is_empty() {
-        return None;
-    }
-    let token = extract_version_token(&version)?;
-    parse_version(&token)
-}
-
-#[cfg(any(test, coverage))]
-fn detect_tool_version(_bin: &str) -> Option<ParsedVersion> {
-    None
-}
-
 fn classify_version(actual: ParsedVersion, verified: ParsedVersion) -> VersionStatus {
     if actual.major == verified.major {
         if actual.minor == verified.minor {
@@ -221,7 +178,6 @@ mod tests {
             opencode_commands_dir: tmp.path().join("opencode/command"),
             opencode_skills_dir: tmp.path().join("opencode/skill"),
             opencode_agents_file: tmp.path().join("opencode/AGENTS.md"),
-            codex_dir: tmp.path().join("codex/prompts"),
             codex_skills_dir: tmp.path().join("codex/skills"),
             codex_rules_file: tmp.path().join("codex/rules/default.rules"),
             codex_agents_file: tmp.path().join("codex/AGENTS.md"),
@@ -261,45 +217,10 @@ mod tests {
     }
 
     #[test]
-    fn codex_supports_custom_prompts_respects_verified_version() {
-        let tmp = TempDir::new().unwrap();
-        let mut cfg = make_config(&tmp);
-
-        cfg.verified_versions
-            .insert(TOOL_CODEX.to_string(), "0.116.0".to_string());
-        assert!(codex_supports_custom_prompts(&cfg));
-
-        cfg.verified_versions
-            .insert(TOOL_CODEX.to_string(), "0.117.0".to_string());
-        assert!(!codex_supports_custom_prompts(&cfg));
-
-        cfg.verified_versions.clear();
-        assert!(!codex_supports_custom_prompts(&cfg));
-    }
-
-    #[test]
-    fn version_at_least_compares_major_then_minor() {
-        assert!(version_at_least(
-            ParsedVersion {
-                major: 0,
-                minor: 117
-            },
-            CODEX_CUSTOM_PROMPTS_REMOVED_AT
-        ));
-        assert!(!version_at_least(
-            ParsedVersion {
-                major: 0,
-                minor: 116
-            },
-            CODEX_CUSTOM_PROMPTS_REMOVED_AT
-        ));
-    }
-
-    #[test]
     fn check_versions_runs() -> std::io::Result<()> {
         let tmp = TempDir::new()?;
         let mut cfg = make_config(&tmp);
-        fs::create_dir_all(&cfg.codex_dir)?;
+        fs::create_dir_all(&cfg.codex_skills_dir)?;
         fs::create_dir_all(&cfg.claude_dir)?;
         assert!(!check_versions(&cfg));
         cfg.enabled_tools.clear();

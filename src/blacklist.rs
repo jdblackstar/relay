@@ -91,14 +91,6 @@ fn command_basename(suffix: &Path) -> Option<String> {
     }
 }
 
-fn codex_legacy_prompt_candidate(codex_dir: &Path, suffix: &Path) -> Option<PathBuf> {
-    let name = command_basename(suffix)?;
-    if name.starts_with("prompt:") {
-        return None;
-    }
-    Some(codex_dir.join(format!("prompt:{name}")))
-}
-
 fn codex_command_skill_candidate(codex_skills_dir: &Path, suffix: &Path) -> Option<PathBuf> {
     let name = command_basename(suffix)?;
     let skill_name = name.strip_suffix(".md")?;
@@ -172,10 +164,6 @@ pub(crate) fn resolve_tool_paths(cfg: &Config, relative_path: &str, tool: &str) 
         match tool {
             TOOL_CLAUDE => paths.push(cfg.claude_dir.join(suffix)),
             TOOL_CODEX => {
-                push_unique(&mut paths, cfg.codex_dir.join(suffix));
-                if let Some(legacy) = codex_legacy_prompt_candidate(&cfg.codex_dir, suffix) {
-                    push_unique(&mut paths, legacy);
-                }
                 if let Some(skill) = codex_command_skill_candidate(&cfg.codex_skills_dir, suffix) {
                     if is_relay_generated_command_skill(&skill) {
                         push_unique(&mut paths, skill);
@@ -253,21 +241,19 @@ mod tests {
     }
 
     #[test]
-    fn resolve_tool_paths_codex_commands_include_legacy_prompt_candidate() {
+    fn resolve_tool_paths_codex_commands_without_wrapper_are_empty() {
         let tmp = TempDir::new().unwrap();
         let cfg = make_config(&tmp);
         let paths = resolve_tool_paths(&cfg, "commands/review.md", TOOL_CODEX);
-        assert_eq!(paths.len(), 2);
-        assert!(paths.contains(&cfg.codex_dir.join("review.md")));
-        assert!(paths.contains(&cfg.codex_dir.join("prompt:review.md")));
+        assert!(paths.is_empty());
     }
 
     #[test]
-    fn resolve_tool_paths_codex_prompt_name_does_not_duplicate_candidate() {
+    fn resolve_tool_paths_codex_prompt_name_is_not_supported() {
         let tmp = TempDir::new().unwrap();
         let cfg = make_config(&tmp);
         let paths = resolve_tool_paths(&cfg, "commands/prompt:legacy.md", TOOL_CODEX);
-        assert_eq!(paths, vec![cfg.codex_dir.join("prompt:legacy.md")]);
+        assert!(paths.is_empty());
     }
 
     #[test]
@@ -494,15 +480,19 @@ mod tests {
     }
 
     #[test]
-    fn retroactive_delete_removes_legacy_codex_prompt_file() -> io::Result<()> {
+    fn retroactive_delete_leaves_legacy_codex_prompt_file() -> io::Result<()> {
         let (_tmp, cfg) = setup()?;
-        let legacy = cfg.codex_dir.join("prompt:foo.md");
+        let legacy = cfg
+            .codex_skills_dir
+            .parent()
+            .unwrap()
+            .join("prompts/prompt:foo.md");
         write_plain(&legacy, "legacy")?;
         assert!(legacy.exists());
 
         retroactive_delete(&cfg, "commands/foo.md", &[TOOL_CODEX.to_string()])?;
 
-        assert!(!legacy.exists());
+        assert!(legacy.exists());
         Ok(())
     }
 
@@ -519,8 +509,6 @@ mod tests {
         .unwrap();
 
         let paths = resolve_tool_paths(&cfg, "commands/review.md", TOOL_CODEX);
-        assert!(paths.contains(&cfg.codex_dir.join("review.md")));
-        assert!(paths.contains(&cfg.codex_dir.join("prompt:review.md")));
         assert!(paths.contains(&skill_dir));
     }
 
@@ -536,20 +524,19 @@ mod tests {
         .unwrap();
 
         let paths = resolve_tool_paths(&cfg, "commands/review.md", TOOL_CODEX);
-        assert_eq!(paths.len(), 2);
-        assert!(paths.contains(&cfg.codex_dir.join("review.md")));
-        assert!(paths.contains(&cfg.codex_dir.join("prompt:review.md")));
+        assert!(paths.is_empty());
         assert!(!paths.contains(&cfg.codex_skills_dir.join("review")));
     }
 
     #[test]
     fn retroactive_delete_removes_codex_command_skill_wrapper() -> io::Result<()> {
         let (_tmp, cfg) = setup()?;
-        let prompt = cfg.codex_dir.join("review.md");
-        let legacy = cfg.codex_dir.join("prompt:review.md");
+        let codex_prompts = cfg.codex_skills_dir.parent().unwrap().join("prompts");
+        let prompt = codex_prompts.join("review.md");
+        let legacy = codex_prompts.join("prompt:review.md");
         let skill_dir = cfg.codex_skills_dir.join("review");
         write_plain(&prompt, "prompt body")?;
-        write_plain(&legacy, "legacy prompt")?;
+        write_plain(&legacy, "old prompt")?;
         write_skill(
             &cfg.codex_skills_dir,
             "review",
@@ -562,8 +549,8 @@ mod tests {
 
         retroactive_delete(&cfg, "commands/review.md", &[TOOL_CODEX.to_string()])?;
 
-        assert!(!prompt.exists());
-        assert!(!legacy.exists());
+        assert!(prompt.exists());
+        assert!(legacy.exists());
         assert!(!skill_dir.exists());
         Ok(())
     }

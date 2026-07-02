@@ -189,9 +189,7 @@ mod tests {
 
     #[test]
     fn sync_all_preserves_real_codex_skill_when_codex_skills_dir_is_missing() -> io::Result<()> {
-        let (_tmp, mut cfg) = setup()?;
-        cfg.verified_versions
-            .insert(config::TOOL_CODEX.to_string(), "0.117.0".to_string());
+        let (_tmp, cfg) = setup()?;
         fs::remove_dir_all(&cfg.codex_skills_dir)?;
         write_plain(&cfg.central_dir.join("map.md"), "Map command body.")?;
         write_skill(

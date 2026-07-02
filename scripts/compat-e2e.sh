@@ -22,7 +22,6 @@ for bin in codex claude cursor opencode; do
 done
 
 mkdir -p \
-    "$CODEX_HOME/prompts" \
     "$CODEX_HOME/skills/codex-compat" \
     "$CODEX_HOME/rules" \
     "$CLAUDE_HOME/commands" \
@@ -30,10 +29,6 @@ mkdir -p \
     "$CURSOR_HOME/commands" \
     "$OPENCODE_HOME/command" \
     "$OPENCODE_HOME/skill/opencode-compat"
-
-cat <<'CONTENTS' > "$CODEX_HOME/prompts/codex-compat.md"
-Codex compatibility command.
-CONTENTS
 
 cat <<'CONTENTS' > "$CLAUDE_HOME/commands/claude-compat.md"
 Claude compatibility command.
@@ -82,7 +77,6 @@ CONTENTS
 cargo build
 ./target/debug/relay sync --verbose
 
-test -f "$HOME/.config/relay/commands/codex-compat.md"
 test -f "$HOME/.config/relay/commands/claude-compat.md"
 test -f "$HOME/.config/relay/commands/cursor-compat.md"
 test -f "$HOME/.config/relay/commands/opencode-compat.md"

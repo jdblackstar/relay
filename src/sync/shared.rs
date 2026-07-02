@@ -109,32 +109,6 @@ pub(crate) fn list_files(dir: &Path) -> io::Result<HashMap<String, PathBuf>> {
     Ok(list_visible_files(dir)?.into_iter().collect())
 }
 
-pub(crate) fn list_codex_files(dir: &Path) -> io::Result<HashMap<String, PathBuf>> {
-    let mut out: HashMap<String, PathBuf> = HashMap::new();
-    for (name, path) in list_visible_files(dir)? {
-        let (key, prefixed) = if let Some(stripped) = name.strip_prefix("prompt:") {
-            (stripped.to_string(), true)
-        } else {
-            (name.to_string(), false)
-        };
-        let replace = match out.get(&key) {
-            None => true,
-            Some(existing) => {
-                let existing_prefixed = existing
-                    .file_name()
-                    .and_then(|os| os.to_str())
-                    .map(|existing_name| existing_name.starts_with("prompt:"))
-                    .unwrap_or(false);
-                existing_prefixed && !prefixed
-            }
-        };
-        if replace {
-            out.insert(key, path);
-        }
-    }
-    Ok(out)
-}
-
 pub(crate) fn read_markdown_variant(
     tool: &'static str,
     path: &Path,
@@ -572,7 +546,7 @@ mod tests {
     }
 
     #[test]
-    fn list_files_and_codex_files_filter_entries() -> io::Result<()> {
+    fn list_files_filters_entries() -> io::Result<()> {
         let tmp = TempDir::new()?;
         let dir = tmp.path().join("commands");
         fs::create_dir_all(&dir)?;
@@ -583,22 +557,6 @@ mod tests {
         let list = list_files(&dir)?;
         assert!(list.contains_key("visible.md"));
         assert!(!list.contains_key(".hidden.md"));
-
-        let codex_dir = tmp.path().join("codex");
-        fs::create_dir_all(&codex_dir)?;
-        for (name, body) in [
-            ("prompt:legacy.md", "legacy"),
-            ("legacy.md", "new"),
-            (".hidden.md", "skip"),
-        ] {
-            write_plain(&codex_dir.join(name), body)?;
-        }
-        fs::create_dir_all(codex_dir.join("nested"))?;
-        let codex = list_codex_files(&codex_dir)?;
-        assert_eq!(
-            codex.get("legacy.md").unwrap().file_name().unwrap(),
-            "legacy.md"
-        );
         Ok(())
     }
 

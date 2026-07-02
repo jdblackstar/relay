@@ -47,13 +47,13 @@ Relay sandbox shell (isolated HOME)
 
 Sandbox helpers:
   relay_tree                    Show central + tool file layout
-  relay_codex_layout            Inspect Codex prompts vs skills vs wrappers
+  relay_codex_layout            Inspect Codex skills and wrappers
   relay_reseed                  Reset fixture files (does not delete sync output)
   relay_reset                   Wipe this sandbox and re-enter setup
 
 Paths:
   RELAY_HOME   central config + store
-  CODEX_HOME   prompts + skills (legacy commands + skill wrappers)
+  CODEX_HOME   skills, rules, and AGENTS
 HELP
 }
 
@@ -72,9 +72,6 @@ relay_tree() {
 }
 
 relay_codex_layout() {
-    echo "Codex legacy prompts (${CODEX_HOME}/prompts):"
-    ls -la "${CODEX_HOME}/prompts" 2>/dev/null || echo "  (missing)"
-    echo
     echo "Codex skills (${CODEX_HOME}/skills):"
     if [[ -d "${CODEX_HOME}/skills" ]]; then
         find "${CODEX_HOME}/skills" -mindepth 1 -maxdepth 2 -type f | sort

@@ -74,7 +74,6 @@ done
 cargo build
 "$RELAY_BIN" sync --verbose
 
-test -f "$HOME/.config/relay/commands/codex-sandbox.md"
 test -f "$HOME/.config/relay/commands/claude-sandbox.md"
 test -f "$HOME/.config/relay/commands/opencode-sandbox.md"
 test -d "$HOME/.config/relay/skills/codex-sandbox"
@@ -84,9 +83,7 @@ test -f "$HOME/.config/relay/agents/codex/AGENTS.md"
 test -f "$HOME/.config/relay/agents/opencode/AGENTS.md"
 test -f "$HOME/.config/relay/rules/codex/default.rules"
 
-assert_codex_command_skill_wrapper "claude-sandbox" "Claude sandbox command."
 assert_codex_command_skill_wrapper "cursor-sandbox" "Cursor sandbox command."
-assert_codex_command_skill_wrapper "opencode-sandbox" "OpenCode sandbox command."
 
 watch_log="$(mktemp)"
 "$RELAY_BIN" watch --quiet --debounce-ms "$WATCH_DEBOUNCE_MS" >"$watch_log" 2>&1 &
@@ -119,7 +116,12 @@ if ! write_probe_file; then
 fi
 
 # Clean up probe file
-rm -f "$probe_file" "$HOME/.config/relay/commands/watch-probe.md"
+rm -f \
+    "$probe_file" \
+    "$HOME/.config/relay/commands/watch-probe.md" \
+    "$CURSOR_HOME/commands/watch-probe.md" \
+    "$OPENCODE_HOME/command/watch-probe.md"
+rm -rf "$CODEX_HOME/skills/watch-probe"
 
 # Write test file with retry logic
 write_test_file() {

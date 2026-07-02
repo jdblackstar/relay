@@ -23,10 +23,6 @@ fn cursor_commands(cfg: &Config) -> &PathBuf {
     &cfg.cursor_dir
 }
 
-fn codex_commands(cfg: &Config) -> &PathBuf {
-    &cfg.codex_dir
-}
-
 fn codex_skills(cfg: &Config) -> &PathBuf {
     &cfg.codex_skills_dir
 }
@@ -65,7 +61,7 @@ pub(crate) const TOOL_DEFINITIONS: [ToolDefinition; 4] = [
         id: TOOL_CODEX,
         label: "Codex CLI",
         version_bin: Some("codex"),
-        commands_dir: Some(codex_commands),
+        commands_dir: None,
         skills_dir: Some(codex_skills),
         agents_file: Some(codex_agents),
         rules_file: Some(codex_rules),

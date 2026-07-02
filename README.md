@@ -11,7 +11,6 @@ Commands:
 - Claude commands: `$CLAUDE_HOME/commands` (default `~/.claude/commands`)
 - Cursor commands: `$CURSOR_HOME/commands` (default `~/.cursor/commands`)
 - OpenCode commands: `$OPENCODE_HOME/command` (default `~/.config/opencode/command`)
-- Codex legacy prompts: `$CODEX_HOME/prompts` (default `~/.codex/prompts`; synced only on Codex < 0.117.0)
 - Codex command skill wrappers: `$CODEX_HOME/skills/<name>/SKILL.md`
 
 Skills:
@@ -33,15 +32,13 @@ Rules:
 - Codex rules: `$CODEX_HOME/rules/default.rules` (default `~/.codex/rules/default.rules`)
 
 Commands are markdown files (e.g. `review.md`). For Codex, relay generates a skill
-wrapper at `$CODEX_HOME/skills/<name>/SKILL.md`, so current Codex builds can
-discover the workflow through skills. Legacy prompt files at
-`$CODEX_HOME/prompts/<name>.md` are still read for migration, but relay writes
-prompt files only when Codex is older than 0.117.0 (custom prompts were removed
-in that release). Generated command skill wrappers include a `.relay-command`
-marker and are ignored as skill sources. If a real skill and generated command
-wrapper share a Codex skill name, the real skill owns that directory and relay
-skips the wrapper. Skills are stored as directories named after the skill, with
-a `SKILL.md` inside (e.g. `review/SKILL.md`).
+wrapper at `$CODEX_HOME/skills/<name>/SKILL.md`, so Codex can discover the
+workflow through skills. Relay does not sync old `$CODEX_HOME/prompts` command
+files. Generated command skill wrappers include a `.relay-command` marker and
+are ignored as skill sources. If a real skill and generated command wrapper
+share a Codex skill name, the real skill owns that directory and relay skips the
+wrapper. Skills are stored as directories named after the skill, with a
+`SKILL.md` inside (e.g. `review/SKILL.md`).
 Claude and OpenCode also read project commands from `.claude/commands/` and
 `.opencode/command/`, plus project skills from `.claude/skills/<name>/SKILL.md`
 and `.opencode/skill/<name>/SKILL.md`; relay currently syncs global locations
@@ -187,9 +184,7 @@ Setup and launchd scheduling guide: `docs/weekly-compat-pr.md`.
   `~/.config/relay` data into `~/.dotfiles/config/relay` and symlink
   `~/.config/relay` to the dotfiles location.
 - Version checks for `codex` and `claude` are best-effort and informational.
-- Legacy Codex files prefixed with `prompt:` are supported; relay reads legacy
-  prompt files for migration, writes plain filenames only for legacy Codex
-  versions, and writes generated skill wrappers for current Codex discovery.
+- Old Codex prompt files under `$CODEX_HOME/prompts` are ignored.
 - Only selected tools are synced and watched.
 
 ## Adding Tools
@@ -211,7 +206,7 @@ If a tool does not support an ability, set it to `None`.
 
 Each tool has its own subdirectories or files:
 
-- Commands: `commands` (Codex uses `prompts`)
+- Commands: `commands` (Codex uses generated skill wrappers)
 - Skills: `skills`
 - Agents: `AGENTS.md`
 - Rules: `rules/default.rules` (Codex only)
@@ -286,6 +281,6 @@ See `CONTRIBUTING.md` and `SECURITY.md` for contribution and disclosure policy.
 ## Roadmap
 
 - `relay import` for project-level resources from `.relay/` into your current
-  project (selectively importing skills, commands, and prompts).
+  project (selectively importing skills, commands, agents, and rules).
 - Import is intentionally deferred for now while ecosystem conventions are
   shifting toward `.agents/`-style layouts.

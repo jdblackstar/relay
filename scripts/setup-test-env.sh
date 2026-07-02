@@ -17,7 +17,6 @@ mkdir -p \
   "${HOME_DIR}/.config/relay/rules" \
   "${HOME_DIR}/.claude/commands" \
   "${HOME_DIR}/.claude/skills" \
-  "${HOME_DIR}/.codex/prompts" \
   "${HOME_DIR}/.codex/skills" \
   "${HOME_DIR}/.codex/rules" \
   "${HOME_DIR}/.cursor/commands" \
@@ -60,7 +59,6 @@ cursor_dir = "${HOME_DIR}/.cursor/commands"
 opencode_commands_dir = "${HOME_DIR}/.config/opencode/command"
 opencode_skills_dir = "${HOME_DIR}/.config/opencode/skill"
 opencode_agents_file = "${HOME_DIR}/.config/opencode/AGENTS.md"
-codex_dir = "${HOME_DIR}/.codex/prompts"
 codex_skills_dir = "${HOME_DIR}/.codex/skills"
 codex_rules_file = "${HOME_DIR}/.codex/rules/default.rules"
 codex_agents_file = "${HOME_DIR}/.codex/AGENTS.md"

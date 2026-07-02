@@ -11,7 +11,6 @@ set -euo pipefail
 : "${OPENCODE_HOME:?OPENCODE_HOME must be set}"
 
 mkdir -p \
-    "$CODEX_HOME/prompts" \
     "$CODEX_HOME/skills/codex-sandbox" \
     "$CODEX_HOME/rules" \
     "$CLAUDE_HOME/commands" \
@@ -19,10 +18,6 @@ mkdir -p \
     "$CURSOR_HOME/commands" \
     "$OPENCODE_HOME/command" \
     "$OPENCODE_HOME/skill/opencode-sandbox"
-
-cat <<'EOF' >"$CODEX_HOME/prompts/codex-sandbox.md"
-Codex sandbox command.
-EOF
 
 cat <<'EOF' >"$CLAUDE_HOME/commands/claude-sandbox.md"
 Claude sandbox command.

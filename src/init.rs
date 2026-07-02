@@ -33,7 +33,11 @@ pub(crate) fn init() -> io::Result<()> {
     };
     let claude_base = prompt_tool_base(TOOL_CLAUDE, "Claude base directory", &defaults.claude_dir)?;
     let cursor_base = prompt_tool_base(TOOL_CURSOR, "Cursor base directory", &defaults.cursor_dir)?;
-    let codex_base = prompt_tool_base(TOOL_CODEX, "Codex base directory", &defaults.codex_dir)?;
+    let codex_base = prompt_tool_base(
+        TOOL_CODEX,
+        "Codex base directory",
+        &defaults.codex_skills_dir,
+    )?;
     let opencode_base = prompt_tool_base(
         TOOL_OPENCODE,
         "OpenCode base directory",
@@ -47,7 +51,6 @@ pub(crate) fn init() -> io::Result<()> {
         "skills",
     );
     let cursor_dir = derive_from_base(cursor_base.as_deref(), &defaults.cursor_dir, "commands");
-    let codex_dir = derive_from_base(codex_base.as_deref(), &defaults.codex_dir, "prompts");
     let codex_skills_dir =
         derive_from_base(codex_base.as_deref(), &defaults.codex_skills_dir, "skills");
     let codex_rules_file = derive_from_base(
@@ -90,7 +93,6 @@ pub(crate) fn init() -> io::Result<()> {
         opencode_commands_dir: oc_dir,
         opencode_skills_dir: os_dir,
         opencode_agents_file: oa_file,
-        codex_dir,
         codex_skills_dir,
         codex_rules_file,
         codex_agents_file,
@@ -188,7 +190,6 @@ fn ensure_tool_bases(cfg: &Config) -> io::Result<()> {
     }
     if cfg.tool_enabled(TOOL_CODEX) {
         ensure_existing_paths(&[
-            &cfg.codex_dir,
             &cfg.codex_skills_dir,
             &cfg.codex_rules_file,
             &cfg.codex_agents_file,
@@ -508,7 +509,6 @@ mod tests {
             opencode_commands_dir: tmp.path().join("opencode/command"),
             opencode_skills_dir: tmp.path().join("opencode/skill"),
             opencode_agents_file: tmp.path().join("opencode/AGENTS.md"),
-            codex_dir: tmp.path().join("codex/prompts"),
             codex_skills_dir: tmp.path().join("codex/skills"),
             codex_rules_file: tmp.path().join("codex/rules/default.rules"),
             codex_agents_file: tmp.path().join("codex/AGENTS.md"),
@@ -597,7 +597,7 @@ mod tests {
 
         let claude_base = tool_base_default(&cfg.claude_dir);
         assert!(claude_base.ends_with("claude"));
-        let codex_base = tool_base_default(&cfg.codex_dir);
+        let codex_base = tool_base_default(&cfg.codex_skills_dir);
         assert!(codex_base.ends_with("codex"));
         let opencode_base = tool_base_default(&cfg.opencode_commands_dir);
         assert!(opencode_base.ends_with("opencode"));
@@ -910,7 +910,6 @@ mod tests {
         fs::create_dir_all(&cfg.claude_dir)?;
         fs::create_dir_all(&cfg.claude_skills_dir)?;
         fs::create_dir_all(&cfg.cursor_dir)?;
-        fs::create_dir_all(&cfg.codex_dir)?;
         fs::create_dir_all(&cfg.codex_skills_dir)?;
         fs::create_dir_all(&cfg.opencode_commands_dir)?;
         fs::create_dir_all(&cfg.opencode_skills_dir)?;

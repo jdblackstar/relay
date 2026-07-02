@@ -1,12 +1,10 @@
 use super::shared::{
-    collect_names, conflict_for_variants, list_codex_files, list_files, list_if, log_action,
-    read_markdown_variant, select_markdown_winner, update_markdown_target, MarkdownVariant,
-    TOOL_CENTRAL,
+    collect_names, conflict_for_variants, list_files, list_if, log_action, read_markdown_variant,
+    select_markdown_winner, update_markdown_target, MarkdownVariant, TOOL_CENTRAL,
 };
 use super::{ExecutionMode, LogMode, SyncConflict, SyncItemKind, SyncStats};
 use crate::config::{Config, TOOL_CLAUDE, TOOL_CODEX, TOOL_CURSOR, TOOL_OPENCODE};
 use crate::history::HistoryRecorder;
-use crate::versions::codex_supports_custom_prompts;
 use std::collections::{HashMap, HashSet};
 use std::io;
 
@@ -54,23 +52,18 @@ pub(crate) fn sync_commands_with_reserved_codex_skill_names(
     let claude_enabled = cfg.tool_enabled(TOOL_CLAUDE) && cfg.claude_dir.exists();
     let cursor_enabled = cfg.tool_enabled(TOOL_CURSOR) && cfg.cursor_dir.exists();
     let opencode_enabled = cfg.tool_enabled(TOOL_OPENCODE) && cfg.opencode_commands_dir.exists();
-    let codex_enabled = cfg.tool_enabled(TOOL_CODEX);
-    let codex_prompts_read_enabled = codex_enabled && cfg.codex_dir.exists();
-    let codex_prompts_write_enabled =
-        codex_prompts_read_enabled && codex_supports_custom_prompts(cfg);
     let codex_skills_enabled = super::skills::codex_skills_target_enabled(cfg);
 
     let claude = list_if(claude_enabled, &cfg.claude_dir, list_files)?;
     let cursor = list_if(cursor_enabled, &cfg.cursor_dir, list_files)?;
     let opencode = list_if(opencode_enabled, &cfg.opencode_commands_dir, list_files)?;
-    let codex = list_if(codex_prompts_read_enabled, &cfg.codex_dir, list_codex_files)?;
     let central = if cfg.central_dir.exists() {
         list_files(&cfg.central_dir)?
     } else {
         HashMap::new()
     };
 
-    let names = collect_names(&[&claude, &cursor, &opencode, &codex, &central]);
+    let names = collect_names(&[&claude, &cursor, &opencode, &central]);
     for name in names {
         let blacklist_key = format!("commands/{name}");
         let mut variants: Vec<MarkdownVariant> = Vec::new();
@@ -79,7 +72,6 @@ pub(crate) fn sync_commands_with_reserved_codex_skill_names(
             (TOOL_CLAUDE, &claude),
             (TOOL_CURSOR, &cursor),
             (TOOL_OPENCODE, &opencode),
-            (TOOL_CODEX, &codex),
         ] {
             if let Some(path) = map.get(&name) {
                 variants.push(read_markdown_variant(tool, path)?);
@@ -109,7 +101,6 @@ pub(crate) fn sync_commands_with_reserved_codex_skill_names(
             (TOOL_CLAUDE, claude_enabled, &cfg.claude_dir),
             (TOOL_CURSOR, cursor_enabled, &cfg.cursor_dir),
             (TOOL_OPENCODE, opencode_enabled, &cfg.opencode_commands_dir),
-            (TOOL_CODEX, codex_prompts_write_enabled, &cfg.codex_dir),
         ] {
             if !enabled {
                 continue;
@@ -166,28 +157,32 @@ mod tests {
         let (_tmp, cfg) = setup()?;
 
         let claude = cfg.claude_dir.join("review.md");
-        let codex = cfg.codex_dir.join("review.md");
+        let cursor = cfg.cursor_dir.join("review.md");
 
         write_plain(&claude, &doc("claude", "Claude body"))?;
-        write_plain(&codex, &doc("codex", "Codex body"))?;
+        write_plain(&cursor, &doc("cursor", "Cursor body"))?;
 
-        crate::sync::test_support::set_mtime(&codex, 2_000_000_000)?;
+        crate::sync::test_support::set_mtime(&cursor, 2_000_000_000)?;
 
         sync_commands(&cfg, LogMode::Quiet)?;
 
-        assert_eq!(read_body(&claude)?, "Codex body");
-        assert_eq!(read_body(&codex)?, "Codex body");
+        assert_eq!(read_body(&claude)?, "Cursor body");
+        assert_eq!(read_body(&cursor)?, "Cursor body");
 
         let claude_frontmatter = read_frontmatter(&claude)?;
         assert!(claude_frontmatter
             .unwrap_or_default()
-            .contains("name: codex"));
+            .contains("name: cursor"));
 
         let central = cfg.central_dir.join("review.md");
-        assert_eq!(read_body(&central)?, "Codex body");
+        assert_eq!(read_body(&central)?, "Cursor body");
         assert!(read_frontmatter(&central)?
             .unwrap_or_default()
-            .contains("name: codex"));
+            .contains("name: cursor"));
+        assert_eq!(
+            read_body(&cfg.codex_skills_dir.join("review/SKILL.md"))?,
+            "Cursor body"
+        );
         Ok(())
     }
 
@@ -196,13 +191,13 @@ mod tests {
         let (_tmp, cfg) = setup()?;
 
         let claude = cfg.claude_dir.join("same.md");
-        let codex = cfg.codex_dir.join("same.md");
+        let cursor = cfg.cursor_dir.join("same.md");
 
         write_plain(&claude, &doc("shared", "Same body"))?;
-        write_plain(&codex, &doc("shared", "Same body"))?;
+        write_plain(&cursor, &doc("shared", "Same body"))?;
 
         crate::sync::test_support::set_mtime(&claude, 2_100_000_000)?;
-        crate::sync::test_support::set_mtime(&codex, 2_100_000_100)?;
+        crate::sync::test_support::set_mtime(&cursor, 2_100_000_100)?;
 
         sync_commands(&cfg, LogMode::Quiet)?;
 
@@ -211,25 +206,6 @@ mod tests {
             super::super::shared::file_mtime_value(&claude),
             expected_nanos
         );
-        Ok(())
-    }
-
-    #[test]
-    fn sync_commands_supports_codex_prompt_prefix() -> io::Result<()> {
-        let (_tmp, cfg) = setup()?;
-
-        let legacy = cfg.codex_dir.join("prompt:legacy.md");
-        write_plain(&legacy, "Legacy body")?;
-
-        sync_commands(&cfg, LogMode::Quiet)?;
-
-        for path in [
-            cfg.codex_dir.join("legacy.md"),
-            cfg.claude_dir.join("legacy.md"),
-            cfg.central_dir.join("legacy.md"),
-        ] {
-            assert_eq!(fs::read_to_string(path)?, "Legacy body");
-        }
         Ok(())
     }
 
@@ -251,8 +227,10 @@ mod tests {
         assert!(read_frontmatter(&claude)?
             .unwrap_or_default()
             .contains("name: opencode"));
-        let codex = cfg.codex_dir.join("build.md");
-        assert_eq!(read_body(&codex)?, "New");
+        assert_eq!(
+            read_body(&cfg.codex_skills_dir.join("build/SKILL.md"))?,
+            "New"
+        );
         Ok(())
     }
 
@@ -260,11 +238,9 @@ mod tests {
     fn sync_commands_central_wins_and_syncs_required_frontmatter() -> io::Result<()> {
         let (_tmp, cfg) = setup()?;
         let claude = cfg.claude_dir.join("review.md");
-        let codex = cfg.codex_dir.join("review.md");
         let central = cfg.central_dir.join("review.md");
 
         write_plain(&claude, &doc("claude", "Old"))?;
-        write_plain(&codex, &doc("codex", "Old"))?;
         write_plain(&central, &doc("central", "New"))?;
         crate::sync::test_support::set_mtime(&central, 2_200_000_300)?;
 
@@ -274,13 +250,13 @@ mod tests {
         assert!(read_frontmatter(&claude)?
             .unwrap_or_default()
             .contains("name: central"));
-        assert_eq!(read_body(&codex)?, "New");
-        assert!(read_frontmatter(&codex)?
-            .unwrap_or_default()
-            .contains("name: central"));
         assert!(read_frontmatter(&central)?
             .unwrap_or_default()
             .contains("name: central"));
+        assert_eq!(
+            read_body(&cfg.codex_skills_dir.join("review/SKILL.md"))?,
+            "New"
+        );
         Ok(())
     }
 
@@ -289,7 +265,6 @@ mod tests {
         let (_tmp, mut cfg) = setup()?;
 
         let claude = cfg.claude_dir.join("review.md");
-        let codex = cfg.codex_dir.join("review.md");
         let skill_dir = cfg.codex_skills_dir.join("review");
 
         write_plain(&claude, &doc("claude", "Body"))?;
@@ -301,7 +276,6 @@ mod tests {
 
         sync_commands(&cfg, LogMode::Quiet)?;
 
-        assert!(!codex.exists());
         assert!(!skill_dir.exists());
         Ok(())
     }
@@ -325,7 +299,7 @@ mod tests {
         )?;
 
         assert!(!cfg.codex_skills_dir.join("review/SKILL.md").exists());
-        assert!(cfg.codex_dir.join("review.md").exists());
+        assert!(cfg.central_dir.join("review.md").exists());
         Ok(())
     }
 
@@ -334,7 +308,6 @@ mod tests {
         let (_tmp, mut cfg) = setup()?;
 
         let claude = cfg.claude_dir.join("review.md");
-        let codex = cfg.codex_dir.join("review.md");
         let central = cfg.central_dir.join("review.md");
 
         write_plain(&claude, &doc("claude", "Body"))?;
@@ -350,8 +323,8 @@ mod tests {
         // Central should get it
         assert!(central.exists());
         assert_eq!(read_body(&central)?, "Body");
-        // Codex should NOT get it
-        assert!(!codex.exists());
+        // Codex should NOT get a generated command skill wrapper
+        assert!(!cfg.codex_skills_dir.join("review/SKILL.md").exists());
         // Claude should keep it
         assert!(claude.exists());
         Ok(())
@@ -363,11 +336,9 @@ mod tests {
 
         let claude = cfg.claude_dir.join("cursor-check.md");
         let cursor = cfg.cursor_dir.join("cursor-check.md");
-        let codex = cfg.codex_dir.join("cursor-check.md");
 
         write_plain(&claude, &doc("claude", "Old"))?;
         write_plain(&cursor, &doc("cursor", "Newest from cursor"))?;
-        write_plain(&codex, &doc("codex", "Old"))?;
 
         crate::sync::test_support::set_mtime(&cursor, 2_400_000_100)?;
 
@@ -375,86 +346,63 @@ mod tests {
 
         assert_eq!(read_body(&claude)?, "Newest from cursor");
         assert_eq!(read_body(&cursor)?, "Newest from cursor");
-        assert_eq!(read_body(&codex)?, "Newest from cursor");
         assert!(read_frontmatter(&claude)?
             .unwrap_or_default()
             .contains("name: cursor"));
-        assert!(read_frontmatter(&codex)?
-            .unwrap_or_default()
-            .contains("name: cursor"));
+        assert_eq!(
+            read_body(&cfg.codex_skills_dir.join("cursor-check/SKILL.md"))?,
+            "Newest from cursor"
+        );
         Ok(())
     }
 
     #[test]
-    fn sync_commands_reads_existing_codex_prompts_when_version_unsupported() -> io::Result<()> {
-        let (_tmp, mut cfg) = setup()?;
-        cfg.verified_versions
-            .insert(TOOL_CODEX.to_string(), "0.117.0".to_string());
+    fn sync_commands_ignores_existing_codex_prompts() -> io::Result<()> {
+        let (tmp, cfg) = setup()?;
 
-        let codex = cfg.codex_dir.join("review.md");
-        write_plain(&codex, &doc("codex", "Legacy codex prompt"))?;
+        let codex = tmp.path().join(".codex/prompts/review.md");
+        let central = cfg.central_dir.join("review.md");
+        write_plain(&codex, &doc("codex", "Stale codex prompt"))?;
+        write_plain(&central, &doc("central", "Current command"))?;
+        crate::sync::test_support::set_mtime(&codex, 2_500_000_000)?;
 
         sync_commands(&cfg, LogMode::Quiet)?;
 
-        assert_eq!(
-            read_body(&cfg.central_dir.join("review.md"))?,
-            "Legacy codex prompt"
-        );
+        assert_eq!(read_body(&central)?, "Current command");
         assert_eq!(
             read_body(&cfg.codex_skills_dir.join("review/SKILL.md"))?,
-            "Legacy codex prompt"
+            "Current command"
         );
-        assert_eq!(read_body(&codex)?, "Legacy codex prompt");
+        assert_eq!(read_body(&codex)?, "Stale codex prompt");
         Ok(())
     }
 
     #[test]
     fn sync_commands_creates_codex_skill_dir_when_missing() -> io::Result<()> {
-        let (_tmp, mut cfg) = setup()?;
-        cfg.verified_versions
-            .insert(TOOL_CODEX.to_string(), "0.117.0".to_string());
+        let (_tmp, cfg) = setup()?;
         fs::remove_dir_all(&cfg.codex_skills_dir)?;
 
-        let codex = cfg.codex_dir.join("review.md");
-        write_plain(&codex, &doc("codex", "Legacy codex prompt"))?;
+        write_plain(&cfg.central_dir.join("review.md"), "Review body")?;
 
         sync_commands(&cfg, LogMode::Quiet)?;
 
         assert_eq!(
             read_body(&cfg.codex_skills_dir.join("review/SKILL.md"))?,
-            "Legacy codex prompt"
+            "Review body"
         );
         Ok(())
     }
 
     #[test]
-    fn sync_commands_skips_codex_prompts_when_version_unsupported() -> io::Result<()> {
-        let (_tmp, mut cfg) = setup()?;
-        cfg.verified_versions
-            .insert(TOOL_CODEX.to_string(), "0.117.0".to_string());
+    fn sync_commands_does_not_write_codex_prompts() -> io::Result<()> {
+        let (tmp, cfg) = setup()?;
 
         let claude = cfg.claude_dir.join("review.md");
         write_plain(&claude, &doc("claude", "Review body"))?;
 
         sync_commands(&cfg, LogMode::Quiet)?;
 
-        assert!(!cfg.codex_dir.join("review.md").exists());
-        assert!(cfg.codex_skills_dir.join("review/SKILL.md").exists());
-        Ok(())
-    }
-
-    #[test]
-    fn sync_commands_still_writes_codex_prompts_for_legacy_version() -> io::Result<()> {
-        let (_tmp, mut cfg) = setup()?;
-        cfg.verified_versions
-            .insert(TOOL_CODEX.to_string(), "0.116.9".to_string());
-
-        let claude = cfg.claude_dir.join("review.md");
-        write_plain(&claude, &doc("claude", "Review body"))?;
-
-        sync_commands(&cfg, LogMode::Quiet)?;
-
-        assert!(cfg.codex_dir.join("review.md").exists());
+        assert!(!tmp.path().join(".codex/prompts/review.md").exists());
         assert!(cfg.codex_skills_dir.join("review/SKILL.md").exists());
         Ok(())
     }
