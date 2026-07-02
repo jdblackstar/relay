@@ -58,11 +58,7 @@ pub(crate) fn sync_commands_with_reserved_codex_skill_names(
     let codex_prompts_read_enabled = codex_enabled && cfg.codex_dir.exists();
     let codex_prompts_write_enabled =
         codex_prompts_read_enabled && codex_supports_custom_prompts(cfg);
-    let codex_skills_enabled = codex_enabled
-        && cfg
-            .codex_skills_dir
-            .parent()
-            .is_some_and(|parent| parent.exists());
+    let codex_skills_enabled = super::skills::codex_skills_target_enabled(cfg);
 
     let claude = list_if(claude_enabled, &cfg.claude_dir, list_files)?;
     let cursor = list_if(cursor_enabled, &cfg.cursor_dir, list_files)?;

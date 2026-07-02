@@ -188,6 +188,35 @@ mod tests {
     }
 
     #[test]
+    fn sync_all_preserves_real_codex_skill_when_codex_skills_dir_is_missing() -> io::Result<()> {
+        let (_tmp, mut cfg) = setup()?;
+        cfg.verified_versions
+            .insert(config::TOOL_CODEX.to_string(), "0.117.0".to_string());
+        fs::remove_dir_all(&cfg.codex_skills_dir)?;
+        write_plain(&cfg.central_dir.join("map.md"), "Map command body.")?;
+        write_skill(
+            &cfg.central_skills_dir,
+            "map",
+            &doc("central", "Central skill body."),
+        )?;
+
+        let outcome = sync_all_with_mode(&cfg, LogMode::Quiet, ExecutionMode::Apply, "sync")?;
+
+        assert!(outcome.report.skills.updated > 0);
+        let skill = fs::read_to_string(cfg.codex_skills_dir.join("map/SKILL.md"))?;
+        assert!(skill.contains("Central skill body."));
+        assert!(!skill.contains("Map command body."));
+        assert!(!cfg
+            .codex_skills_dir
+            .join(format!(
+                "map/{}",
+                crate::markers::RELAY_COMMAND_SKILL_MARKER
+            ))
+            .exists());
+        Ok(())
+    }
+
+    #[test]
     fn sync_all_does_not_reimport_codex_command_skill_wrappers() -> io::Result<()> {
         let (_tmp, cfg) = setup()?;
         write_plain(&cfg.central_dir.join("map.md"), "Map the repository.")?;

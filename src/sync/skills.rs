@@ -66,7 +66,7 @@ pub(crate) fn sync_skills_with_mode(
 
     let claude_enabled = cfg.tool_enabled(TOOL_CLAUDE) && cfg.claude_skills_dir.exists();
     let opencode_enabled = cfg.tool_enabled(TOOL_OPENCODE) && cfg.opencode_skills_dir.exists();
-    let codex_enabled = cfg.tool_enabled(TOOL_CODEX) && cfg.codex_skills_dir.exists();
+    let codex_enabled = codex_skills_target_enabled(cfg);
 
     let claude = list_if(claude_enabled, &cfg.claude_skills_dir, list_skill_dirs)?;
     let opencode = list_if(opencode_enabled, &cfg.opencode_skills_dir, list_skill_dirs)?;
@@ -136,8 +136,7 @@ pub(crate) fn sync_skills_with_mode(
 
 pub(super) fn codex_real_skill_names(cfg: &Config) -> io::Result<HashSet<String>> {
     let mut names = HashSet::new();
-    let codex_enabled = cfg.tool_enabled(TOOL_CODEX) && cfg.codex_skills_dir.exists();
-    if !codex_enabled {
+    if !codex_skills_target_enabled(cfg) {
         return Ok(names);
     }
 
@@ -167,6 +166,14 @@ pub(super) fn codex_real_skill_names(cfg: &Config) -> io::Result<HashSet<String>
     }
 
     Ok(names)
+}
+
+pub(super) fn codex_skills_target_enabled(cfg: &Config) -> bool {
+    cfg.tool_enabled(TOOL_CODEX)
+        && cfg
+            .codex_skills_dir
+            .parent()
+            .is_some_and(|parent| parent.exists())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -497,6 +504,21 @@ mod tests {
             .frontmatter
             .unwrap_or_default()
             .contains("name: central"));
+        Ok(())
+    }
+
+    #[test]
+    fn sync_skills_creates_missing_codex_skills_dir() -> io::Result<()> {
+        let (_tmp, cfg) = setup()?;
+        fs::remove_dir_all(&cfg.codex_skills_dir)?;
+        write_skill(&cfg.central_skills_dir, "plan", &doc("central", "Body"))?;
+
+        sync_skills(&cfg, SyncLogMode::Quiet)?;
+
+        assert_eq!(
+            read_markdown(&cfg.codex_skills_dir.join("plan/SKILL.md"))?.body,
+            "Body"
+        );
         Ok(())
     }
 
