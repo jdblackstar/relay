@@ -23,6 +23,7 @@ pub(crate) fn sync_commands(cfg: &Config, log_mode: LogMode) -> io::Result<SyncS
     )
 }
 
+#[cfg(any(test, coverage))]
 pub(crate) fn sync_commands_with_mode(
     cfg: &Config,
     log_mode: LogMode,
