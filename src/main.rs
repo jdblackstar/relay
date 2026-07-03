@@ -181,9 +181,32 @@ fn warn_if_not_initialized() {
 }
 
 #[cfg_attr(test, allow(dead_code))]
-fn load_cfg() -> std::io::Result<config::Config> {
-    #[cfg(all(not(any(test, coverage)), not(windows)))]
-    warn_if_not_initialized();
+fn require_initialized_config() -> std::io::Result<()> {
+    require_initialized_config_with(config::Config::is_initialized)
+}
+
+#[cfg_attr(test, allow(dead_code))]
+fn require_initialized_config_with<C>(is_initialized: C) -> std::io::Result<()>
+where
+    C: FnOnce() -> std::io::Result<bool>,
+{
+    if is_initialized()? {
+        return Ok(());
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::NotFound,
+        "relay is not initialized; run `relay init` first",
+    ))
+}
+
+#[cfg_attr(test, allow(dead_code))]
+fn load_cfg(require_initialized: bool) -> std::io::Result<config::Config> {
+    if require_initialized {
+        require_initialized_config()?;
+    } else {
+        #[cfg(all(not(any(test, coverage)), not(windows)))]
+        warn_if_not_initialized();
+    }
     config::Config::load_or_default()
 }
 
@@ -312,6 +335,11 @@ fn sync_requires_process_lock(mode: sync::ExecutionMode) -> bool {
 }
 
 #[cfg_attr(test, allow(dead_code))]
+fn sync_requires_initialized_config(mode: sync::ExecutionMode) -> bool {
+    mode == sync::ExecutionMode::Apply
+}
+
+#[cfg_attr(test, allow(dead_code))]
 fn with_process_lock<T, F>(operation: &str, run: F) -> std::io::Result<T>
 where
     F: FnOnce() -> std::io::Result<T>,
@@ -342,15 +370,15 @@ fn main() -> std::io::Result<()> {
             apply: _apply,
             fail_on_conflict,
         } => {
-            let cfg = load_cfg()?;
-            if !confirm_versions_or_continue(&cfg, confirm_versions)? {
-                return Ok(());
-            }
             let mode = if plan {
                 sync::ExecutionMode::Plan
             } else {
                 sync::ExecutionMode::Apply
             };
+            let cfg = load_cfg(sync_requires_initialized_config(mode))?;
+            if !confirm_versions_or_continue(&cfg, confirm_versions)? {
+                return Ok(());
+            }
             logging::debug(&format!(
                 "command=sync mode={mode:?} verbose={verbose} quiet={quiet} confirm_versions={confirm_versions} fail_on_conflict={fail_on_conflict}"
             ));
@@ -396,7 +424,7 @@ fn main() -> std::io::Result<()> {
             logging::debug(&format!(
                 "command=watch debounce_ms={debounce_ms} quiet={quiet} daemon={daemon} confirm_versions={confirm_versions}"
             ));
-            let cfg = load_cfg()?;
+            let cfg = load_cfg(true)?;
             if !confirm_versions_or_continue(&cfg, confirm_versions)? {
                 return Ok(());
             }
@@ -424,11 +452,11 @@ fn main() -> std::io::Result<()> {
         }
         Commands::Status => {
             logging::debug("command=status");
-            let cfg = load_cfg()?;
+            let cfg = load_cfg(true)?;
             print_service_status(&cfg)
         }
         Commands::Daemon { command } => {
-            let cfg = load_cfg()?;
+            let cfg = load_cfg(true)?;
             match command {
                 DaemonCommand::Install {
                     debounce_ms,
@@ -478,7 +506,7 @@ fn main() -> std::io::Result<()> {
         }
         Commands::History { limit } => {
             logging::debug(&format!("command=history limit={limit}"));
-            let cfg = load_cfg()?;
+            let cfg = load_cfg(true)?;
             let store = history::HistoryStore::from_config(&cfg)?;
             let events = store.list_recent(limit)?;
             if events.is_empty() {
@@ -505,7 +533,7 @@ fn main() -> std::io::Result<()> {
             ))?;
             logging::debug(&format!("command=blacklist path={path} tools={tools:?}"));
             with_process_lock("blacklist", || {
-                let mut cfg = load_cfg()?;
+                let mut cfg = load_cfg(true)?;
                 blacklist::add_blacklist(&mut cfg, &path, &tools)
             })?;
             println!("blacklisted {path} for {}", tools.join(", "));
@@ -523,7 +551,7 @@ fn main() -> std::io::Result<()> {
             ))?;
             logging::debug(&format!("command=allow path={path} tools={tools:?}"));
             with_process_lock("allow", || {
-                let mut cfg = load_cfg()?;
+                let mut cfg = load_cfg(true)?;
                 blacklist::remove_blacklist(&mut cfg, &path, &tools)
             })?;
             println!("allowed {path} for {}", tools.join(", "));
@@ -538,7 +566,7 @@ fn main() -> std::io::Result<()> {
                 "command=rollback latest={latest} force={force} event_id={}",
                 event_id.as_deref().unwrap_or("none")
             ));
-            let cfg = load_cfg()?;
+            let cfg = load_cfg(true)?;
             let report = with_process_lock("rollback", || {
                 let store = history::HistoryStore::from_config(&cfg)?;
                 let target_event_id = rollback_target_event_id(&store, event_id, latest)?;
@@ -712,6 +740,28 @@ mod tests {
         assert!(!super::sync_requires_process_lock(
             sync::ExecutionMode::Plan
         ));
+    }
+
+    #[test]
+    fn only_apply_sync_requires_initialized_config() {
+        assert!(super::sync_requires_initialized_config(
+            sync::ExecutionMode::Apply
+        ));
+        assert!(!super::sync_requires_initialized_config(
+            sync::ExecutionMode::Plan
+        ));
+    }
+
+    #[test]
+    fn require_initialized_config_allows_existing_config() {
+        super::require_initialized_config_with(|| Ok(true)).unwrap();
+    }
+
+    #[test]
+    fn require_initialized_config_errors_without_config() {
+        let err = super::require_initialized_config_with(|| Ok(false)).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::NotFound);
+        assert!(err.to_string().contains("relay init"));
     }
 
     #[test]
