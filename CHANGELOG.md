@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- [codex] Require init before mutating commands ([#19](https://github.com/jdblackstar/relay/pull/19))
 
 ## [0.2.4] - 2026-07-02
 
