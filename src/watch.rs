@@ -42,13 +42,13 @@ pub(crate) fn build_watch_list(cfg: &Config) -> Vec<(PathBuf, RecursiveMode)> {
     paths
 }
 
-fn watch_origin(cfg: &Config, paths: &[PathBuf]) -> String {
+fn watch_origin(cfg: &Config, paths: &[PathBuf]) -> Option<String> {
     for path in paths {
         if let Some(origin) = classify_origin(cfg, path) {
-            return origin;
+            return Some(origin);
         }
     }
-    "watch".to_string()
+    None
 }
 
 fn classify_origin(cfg: &Config, path: &Path) -> Option<String> {
@@ -65,7 +65,7 @@ fn classify_origin(cfg: &Config, path: &Path) -> Option<String> {
         }
     }
 
-    let mut roots: Vec<(&str, &Path)> = vec![
+    let roots: [(&str, &Path); 10] = [
         ("central", &cfg.central_dir),
         ("central_skills", &cfg.central_skills_dir),
         ("central_agents", &cfg.central_agents_dir),
@@ -77,27 +77,20 @@ fn classify_origin(cfg: &Config, path: &Path) -> Option<String> {
         ("opencode_skills", &cfg.opencode_skills_dir),
         ("cursor", &cfg.cursor_dir),
     ];
-    if let Some(parent) = cfg.opencode_agents_file.parent() {
-        roots.push(("opencode_agents", parent));
-    }
     for (label, root) in roots {
         if let Some(origin) = format_origin(path, root, label) {
             return Some(origin);
         }
     }
 
-    let file_roots: [(&str, &Path); 2] = [
+    let files: [(&str, &Path); 3] = [
+        ("opencode_agents", &cfg.opencode_agents_file),
         ("codex_agents", &cfg.codex_agents_file),
         ("codex_rules", &cfg.codex_rules_file),
     ];
-    for (label, root) in file_roots {
-        if path == root {
+    for (label, file) in files {
+        if path == file {
             return Some(format!("watch:{label}"));
-        }
-        if let Some(parent) = root.parent() {
-            if let Some(origin) = format_origin(path, parent, label) {
-                return Some(origin);
-            }
         }
     }
 
@@ -189,7 +182,10 @@ pub(crate) fn watch(cfg: &Config, debounce_ms: u64, log_mode: LogMode) -> io::Re
                 }
             }
         }
-        let origin = watch_origin(cfg, &changed_paths);
+        let Some(origin) = watch_origin(cfg, &changed_paths) else {
+            crate::logging::debug("watch ignored unrelated event batch");
+            continue;
+        };
         crate::logging::debug(&format!("watch applying sync origin={origin}"));
         let _lock = ProcessLock::acquire(&origin)?;
         let _ = sync::sync_all_with_mode(cfg, log_mode, ExecutionMode::Apply, &origin)?;
@@ -302,16 +298,66 @@ mod tests {
         let tmp = TempDir::new()?;
         let cfg = make_config(&tmp);
         let origin = watch_origin(&cfg, &[cfg.codex_skills_dir.join("review/SKILL.md")]);
-        assert_eq!(origin, "watch:codex_skills:review/SKILL.md");
+        assert_eq!(
+            origin.as_deref(),
+            Some("watch:codex_skills:review/SKILL.md")
+        );
         Ok(())
     }
 
     #[test]
-    fn watch_origin_falls_back_when_unrecognized() -> io::Result<()> {
+    fn watch_origin_ignores_unrecognized_path() -> io::Result<()> {
         let tmp = TempDir::new()?;
         let cfg = make_config(&tmp);
         let origin = watch_origin(&cfg, &[tmp.path().join("other/path.md")]);
-        assert_eq!(origin, "watch");
+        assert_eq!(origin, None);
+        Ok(())
+    }
+
+    #[test]
+    fn watch_origin_matches_file_inputs_exactly() -> io::Result<()> {
+        let tmp = TempDir::new()?;
+        let cfg = make_config(&tmp);
+
+        for (path, expected) in [
+            (&cfg.codex_agents_file, "watch:codex_agents"),
+            (&cfg.codex_rules_file, "watch:codex_rules"),
+            (&cfg.opencode_agents_file, "watch:opencode_agents"),
+        ] {
+            assert_eq!(
+                watch_origin(&cfg, std::slice::from_ref(path)).as_deref(),
+                Some(expected)
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn watch_origin_ignores_siblings_of_file_inputs() -> io::Result<()> {
+        let tmp = TempDir::new()?;
+        let cfg = make_config(&tmp);
+
+        let codex_sibling = cfg.codex_agents_file.parent().unwrap().join("state.sqlite");
+        let opencode_sibling = cfg
+            .opencode_agents_file
+            .parent()
+            .unwrap()
+            .join("opencode.json");
+
+        assert_eq!(watch_origin(&cfg, &[codex_sibling]), None);
+        assert_eq!(watch_origin(&cfg, &[opencode_sibling]), None);
+        Ok(())
+    }
+
+    #[test]
+    fn watch_origin_uses_relevant_path_from_mixed_batch() -> io::Result<()> {
+        let tmp = TempDir::new()?;
+        let cfg = make_config(&tmp);
+        let unrelated = cfg.codex_agents_file.parent().unwrap().join("state.sqlite");
+
+        let origin = watch_origin(&cfg, &[unrelated, cfg.codex_agents_file.clone()]);
+
+        assert_eq!(origin.as_deref(), Some("watch:codex_agents"));
         Ok(())
     }
 }
