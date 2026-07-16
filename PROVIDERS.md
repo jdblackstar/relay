@@ -14,7 +14,7 @@ Keep this up to date as tooling changes.
 
 - Codex: `true`. Relay writes generated command skill wrappers at `$CODEX_HOME/skills/name/SKILL.md`. Generated wrappers include `.relay-command`, are ignored as skill sources, and are skipped when a real skill already owns the same name. Relay ignores old `$CODEX_HOME/prompts` command files.
 - Claude: `true`. `/name` maps to `~/.claude/commands/name.md` and project `.claude/commands/`.
-- OpenCode: `true`. Global `~/.config/opencode/command/name.md` and project `.opencode/command/name.md`.
+- OpenCode: `true`. Global `~/.config/opencode/commands/name.md` and project `.opencode/commands/name.md`.
 - Cursor: not supported by relay (project-scoped rules only; skills incomplete).
 
 ## Skills (model-discoverable instructions)
@@ -22,7 +22,7 @@ Keep this up to date as tooling changes.
 - Codex: `true`. `$CODEX_HOME/skills` (default `~/.codex/skills`). Higher level overrides lower (user > project > plugin).
 - Claude: `true`. `~/.claude/skills/<name>/SKILL.md` and project `.claude/skills/<name>/SKILL.md`.
   Requires `SKILL.md` with frontmatter `name:` and `description:`. Higher level overrides lower (user > project > plugin).
-- OpenCode: `true`. Project `.opencode/skill/<name>/SKILL.md` and global `~/.config/opencode/skill/<name>/SKILL.md`.
+- OpenCode: `true`. Project `.opencode/skills/<name>/SKILL.md` and global `~/.config/opencode/skills/<name>/SKILL.md`.
   Also loads Claude-compatible skills from `.claude/skills/<name>/SKILL.md` (project + global).
 - Cursor: not supported by relay (project-scoped rules only; skills incomplete).
 

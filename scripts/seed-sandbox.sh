@@ -16,8 +16,8 @@ mkdir -p \
     "$CLAUDE_HOME/commands" \
     "$CLAUDE_HOME/skills/claude-sandbox" \
     "$CURSOR_HOME/commands" \
-    "$OPENCODE_HOME/command" \
-    "$OPENCODE_HOME/skill/opencode-sandbox"
+    "$OPENCODE_HOME/commands" \
+    "$OPENCODE_HOME/skills/opencode-sandbox"
 
 cat <<'EOF' >"$CLAUDE_HOME/commands/claude-sandbox.md"
 Claude sandbox command.
@@ -27,7 +27,7 @@ cat <<'EOF' >"$CURSOR_HOME/commands/cursor-sandbox.md"
 Cursor sandbox command.
 EOF
 
-cat <<'EOF' >"$OPENCODE_HOME/command/opencode-sandbox.md"
+cat <<'EOF' >"$OPENCODE_HOME/commands/opencode-sandbox.md"
 OpenCode sandbox command.
 EOF
 
@@ -43,7 +43,7 @@ description: Claude sandbox skill.
 Claude sandbox skill body.
 EOF
 
-cat <<'EOF' >"$OPENCODE_HOME/skill/opencode-sandbox/SKILL.md"
+cat <<'EOF' >"$OPENCODE_HOME/skills/opencode-sandbox/SKILL.md"
 ---
 name: opencode-sandbox
 description: OpenCode sandbox skill.

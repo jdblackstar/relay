@@ -27,8 +27,8 @@ mkdir -p \
     "$CLAUDE_HOME/commands" \
     "$CLAUDE_HOME/skills/claude-compat" \
     "$CURSOR_HOME/commands" \
-    "$OPENCODE_HOME/command" \
-    "$OPENCODE_HOME/skill/opencode-compat"
+    "$OPENCODE_HOME/commands" \
+    "$OPENCODE_HOME/skills/opencode-compat"
 
 cat <<'CONTENTS' > "$CLAUDE_HOME/commands/claude-compat.md"
 Claude compatibility command.
@@ -38,7 +38,7 @@ cat <<'CONTENTS' > "$CURSOR_HOME/commands/cursor-compat.md"
 Cursor compatibility command.
 CONTENTS
 
-cat <<'CONTENTS' > "$OPENCODE_HOME/command/opencode-compat.md"
+cat <<'CONTENTS' > "$OPENCODE_HOME/commands/opencode-compat.md"
 OpenCode compatibility command.
 CONTENTS
 
@@ -54,7 +54,7 @@ description: Claude compatibility skill.
 Claude compatibility skill body.
 CONTENTS
 
-cat <<'CONTENTS' > "$OPENCODE_HOME/skill/opencode-compat/SKILL.md"
+cat <<'CONTENTS' > "$OPENCODE_HOME/skills/opencode-compat/SKILL.md"
 ---
 name: opencode-compat
 description: OpenCode compatibility skill.

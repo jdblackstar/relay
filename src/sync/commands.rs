@@ -51,12 +51,21 @@ pub(crate) fn sync_commands_with_reserved_codex_skill_names(
 
     let claude_enabled = cfg.tool_enabled(TOOL_CLAUDE) && cfg.claude_dir.exists();
     let cursor_enabled = cfg.tool_enabled(TOOL_CURSOR) && cfg.cursor_dir.exists();
-    let opencode_enabled = cfg.tool_enabled(TOOL_OPENCODE) && cfg.opencode_commands_dir.exists();
+    let opencode_enabled = cfg.tool_enabled(TOOL_OPENCODE)
+        && cfg
+            .opencode_commands_dir
+            .parent()
+            .is_some_and(|parent| parent.exists());
+    let opencode_read_enabled = opencode_enabled && cfg.opencode_commands_dir.exists();
     let codex_skills_enabled = super::skills::codex_skills_target_enabled(cfg);
 
     let claude = list_if(claude_enabled, &cfg.claude_dir, list_files)?;
     let cursor = list_if(cursor_enabled, &cfg.cursor_dir, list_files)?;
-    let opencode = list_if(opencode_enabled, &cfg.opencode_commands_dir, list_files)?;
+    let opencode = list_if(
+        opencode_read_enabled,
+        &cfg.opencode_commands_dir,
+        list_files,
+    )?;
     let central = if cfg.central_dir.exists() {
         list_files(&cfg.central_dir)?
     } else {
@@ -448,6 +457,21 @@ mod tests {
 
         assert_eq!(
             read_body(&cfg.codex_skills_dir.join("review/SKILL.md"))?,
+            "Review body"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn sync_commands_creates_missing_opencode_commands_dir() -> io::Result<()> {
+        let (_tmp, cfg) = setup()?;
+        fs::remove_dir_all(&cfg.opencode_commands_dir)?;
+        write_plain(&cfg.central_dir.join("review.md"), "Review body")?;
+
+        sync_commands(&cfg, LogMode::Quiet)?;
+
+        assert_eq!(
+            read_body(&cfg.opencode_commands_dir.join("review.md"))?,
             "Review body"
         );
         Ok(())

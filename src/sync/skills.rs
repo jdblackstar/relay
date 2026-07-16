@@ -65,12 +65,21 @@ pub(crate) fn sync_skills_with_mode(
     let mut stats = SyncStats::default();
 
     let claude_enabled = cfg.tool_enabled(TOOL_CLAUDE) && cfg.claude_skills_dir.exists();
-    let opencode_enabled = cfg.tool_enabled(TOOL_OPENCODE) && cfg.opencode_skills_dir.exists();
+    let opencode_enabled = cfg.tool_enabled(TOOL_OPENCODE)
+        && cfg
+            .opencode_skills_dir
+            .parent()
+            .is_some_and(|parent| parent.exists());
+    let opencode_read_enabled = opencode_enabled && cfg.opencode_skills_dir.exists();
     let codex_enabled = codex_skills_target_enabled(cfg);
     let codex_read_enabled = cfg.tool_enabled(TOOL_CODEX) && cfg.codex_skills_dir.exists();
 
     let claude = list_if(claude_enabled, &cfg.claude_skills_dir, list_skill_dirs)?;
-    let opencode = list_if(opencode_enabled, &cfg.opencode_skills_dir, list_skill_dirs)?;
+    let opencode = list_if(
+        opencode_read_enabled,
+        &cfg.opencode_skills_dir,
+        list_skill_dirs,
+    )?;
     let codex = list_if(codex_read_enabled, &cfg.codex_skills_dir, list_skill_dirs)?;
     let central = if cfg.central_skills_dir.exists() {
         list_skill_dirs(&cfg.central_skills_dir)?
@@ -524,6 +533,21 @@ mod tests {
     }
 
     #[test]
+    fn sync_skills_creates_missing_opencode_skills_dir() -> io::Result<()> {
+        let (_tmp, cfg) = setup()?;
+        fs::remove_dir_all(&cfg.opencode_skills_dir)?;
+        write_skill(&cfg.central_skills_dir, "plan", &doc("central", "Body"))?;
+
+        sync_skills(&cfg, SyncLogMode::Quiet)?;
+
+        assert_eq!(
+            read_markdown(&cfg.opencode_skills_dir.join("plan/SKILL.md"))?.body,
+            "Body"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn sync_skills_blacklist_skips_tool_but_syncs_others() -> io::Result<()> {
         let (_tmp, mut cfg) = setup()?;
 
@@ -559,7 +583,7 @@ mod tests {
     #[test]
     fn sync_skills_skips_missing_tool_dir() -> io::Result<()> {
         let (_tmp, cfg) = setup()?;
-        fs::remove_dir_all(&cfg.opencode_skills_dir)?;
+        fs::remove_dir_all(cfg.opencode_skills_dir.parent().unwrap())?;
         write_skill(&cfg.claude_skills_dir, "plan", &doc("claude", "Body"))?;
         sync_skills(&cfg, SyncLogMode::Quiet)?;
         assert!(!cfg.opencode_skills_dir.exists());

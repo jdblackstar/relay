@@ -10,14 +10,14 @@ Commands:
 - Central store: `~/.config/relay/commands`
 - Claude commands: `$CLAUDE_HOME/commands` (default `~/.claude/commands`)
 - Cursor commands: `$CURSOR_HOME/commands` (default `~/.cursor/commands`)
-- OpenCode commands: `$OPENCODE_HOME/command` (default `~/.config/opencode/command`)
+- OpenCode commands: `$OPENCODE_HOME/commands` (default `~/.config/opencode/commands`)
 - Codex command skill wrappers: `$CODEX_HOME/skills/<name>/SKILL.md`
 
 Skills:
 
 - Central store: `~/.config/relay/skills`
 - Claude skills: `$CLAUDE_HOME/skills` (default `~/.claude/skills`)
-- OpenCode skills: `$OPENCODE_HOME/skill` (default `~/.config/opencode/skill`)
+- OpenCode skills: `$OPENCODE_HOME/skills` (default `~/.config/opencode/skills`)
 - Codex skills: `$CODEX_HOME/skills` (default `~/.codex/skills`)
 
 Agents:
@@ -40,8 +40,8 @@ share a Codex skill name, the real skill owns that directory and relay skips the
 wrapper. Skills are stored as directories named after the skill, with a
 `SKILL.md` inside (e.g. `review/SKILL.md`).
 Claude and OpenCode also read project commands from `.claude/commands/` and
-`.opencode/command/`, plus project skills from `.claude/skills/<name>/SKILL.md`
-and `.opencode/skill/<name>/SKILL.md`; relay currently syncs global locations
+`.opencode/commands/`, plus project skills from `.claude/skills/<name>/SKILL.md`
+and `.opencode/skills/<name>/SKILL.md`; relay currently syncs global locations
 only.
 
 ### XDG Notes

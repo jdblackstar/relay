@@ -66,12 +66,12 @@ pub(crate) fn init() -> io::Result<()> {
     let oc_dir = derive_from_base(
         opencode_base.as_deref(),
         &defaults.opencode_commands_dir,
-        "command",
+        "commands",
     );
     let os_dir = derive_from_base(
         opencode_base.as_deref(),
         &defaults.opencode_skills_dir,
-        "skill",
+        "skills",
     );
     let oa_file = derive_from_base(
         opencode_base.as_deref(),
@@ -506,8 +506,8 @@ mod tests {
             claude_dir: tmp.path().join("claude/commands"),
             claude_skills_dir: tmp.path().join("claude/skills"),
             cursor_dir: tmp.path().join("cursor/commands"),
-            opencode_commands_dir: tmp.path().join("opencode/command"),
-            opencode_skills_dir: tmp.path().join("opencode/skill"),
+            opencode_commands_dir: tmp.path().join("opencode/commands"),
+            opencode_skills_dir: tmp.path().join("opencode/skills"),
             opencode_agents_file: tmp.path().join("opencode/AGENTS.md"),
             codex_skills_dir: tmp.path().join("codex/skills"),
             codex_rules_file: tmp.path().join("codex/rules/default.rules"),
