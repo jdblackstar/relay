@@ -231,7 +231,11 @@ impl Config {
     #[inline(never)]
     pub(crate) fn save(&self, path: &Path) -> io::Result<()> {
         path.parent().map(fs::create_dir_all).transpose()?;
-        let serialized = toml::to_string_pretty(self).map_err(serialize_error)?;
+        let mut persisted = self.clone();
+        if let Some(legacy_dir) = &self.opencode_legacy_commands_dir {
+            persisted.opencode_commands_dir = legacy_dir.clone();
+        }
+        let serialized = toml::to_string_pretty(&persisted).map_err(serialize_error)?;
         fs::write(path, serialized)
     }
 }
@@ -1438,9 +1442,26 @@ opencode_dir = "/tmp/opencode/other"
         cfg.opencode_legacy_commands_dir = Some(home.join(".config/opencode/command"));
         let path = tmp.path().join("relay/config.toml");
         cfg.save(&path)?;
-        let contents = fs::read_to_string(path)?;
+        let contents = fs::read_to_string(&path)?;
         assert!(contents.contains("central_dir"));
         assert!(!contents.contains("opencode_legacy_commands_dir"));
+        assert!(contents.contains(
+            format!(
+                "opencode_commands_dir = \"{}\"",
+                home.join(".config/opencode/command").display()
+            )
+            .as_str()
+        ));
+
+        let reloaded = Config::load_from_file(&path)?;
+        assert_eq!(
+            reloaded.opencode_commands_dir,
+            home.join(".config/opencode/commands")
+        );
+        assert_eq!(
+            reloaded.opencode_legacy_commands_dir,
+            Some(home.join(".config/opencode/command"))
+        );
         set_env("RELAY_HOME", None);
         Ok(())
     }

@@ -151,6 +151,7 @@ fn tool_watch_paths(cfg: &Config, tool: &ToolDefinition) -> Vec<(PathBuf, Recurs
 
 #[cfg(not(any(test, coverage)))]
 pub(crate) fn watch(cfg: &Config, debounce_ms: u64, log_mode: LogMode) -> io::Result<()> {
+    ensure_migration_watch_targets(cfg)?;
     let (tx, rx) = mpsc::channel();
     let mut watcher = RecommendedWatcher::new(
         move |res| {
@@ -225,7 +226,20 @@ pub(crate) fn watch(cfg: &Config, debounce_ms: u64, log_mode: LogMode) -> io::Re
 
 #[cfg(any(test, coverage))]
 pub(crate) fn watch(cfg: &Config, _debounce_ms: u64, _log_mode: LogMode) -> io::Result<()> {
+    ensure_migration_watch_targets(cfg)?;
     let _ = build_watch_list(cfg);
+    Ok(())
+}
+
+fn ensure_migration_watch_targets(cfg: &Config) -> io::Result<()> {
+    if cfg.tool_enabled(TOOL_OPENCODE)
+        && cfg
+            .opencode_legacy_commands_dir
+            .as_ref()
+            .is_some_and(|path| path.exists())
+    {
+        std::fs::create_dir_all(&cfg.opencode_commands_dir)?;
+    }
     Ok(())
 }
 
@@ -334,6 +348,25 @@ mod tests {
         let tmp = TempDir::new()?;
         let cfg = make_config(&tmp);
         watch(&cfg, 10, LogMode::Quiet)
+    }
+
+    #[test]
+    fn watch_creates_missing_migration_target() -> io::Result<()> {
+        let tmp = TempDir::new()?;
+        let mut cfg = make_config(&tmp);
+        let legacy = tmp.path().join("opencode/command");
+        cfg.opencode_commands_dir = tmp.path().join("opencode/commands");
+        cfg.opencode_legacy_commands_dir = Some(legacy.clone());
+        fs::create_dir_all(legacy)?;
+
+        watch(&cfg, 10, LogMode::Quiet)?;
+
+        assert!(cfg.opencode_commands_dir.is_dir());
+        assert!(build_watch_list(&cfg).contains(&(
+            cfg.opencode_commands_dir.clone(),
+            RecursiveMode::NonRecursive
+        )));
+        Ok(())
     }
 
     #[test]
