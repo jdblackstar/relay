@@ -1,6 +1,7 @@
 use super::shared::{
     collect_names, conflict_for_variants, list_files, list_if, log_action, read_markdown_variant,
     select_markdown_winner, update_markdown_target, MarkdownVariant, TOOL_CENTRAL,
+    TOOL_OPENCODE_LEGACY,
 };
 use super::{ExecutionMode, LogMode, SyncConflict, SyncItemKind, SyncStats};
 use crate::config::{Config, TOOL_CLAUDE, TOOL_CODEX, TOOL_CURSOR, TOOL_OPENCODE};
@@ -66,13 +67,17 @@ pub(crate) fn sync_commands_with_reserved_codex_skill_names(
         &cfg.opencode_commands_dir,
         list_files,
     )?;
+    let legacy_opencode = match cfg.opencode_legacy_commands_dir.as_deref() {
+        Some(dir) if cfg.tool_enabled(TOOL_OPENCODE) && dir.exists() => list_files(dir)?,
+        _ => HashMap::new(),
+    };
     let central = if cfg.central_dir.exists() {
         list_files(&cfg.central_dir)?
     } else {
         HashMap::new()
     };
 
-    let names = collect_names(&[&claude, &cursor, &opencode, &central]);
+    let names = collect_names(&[&claude, &cursor, &opencode, &legacy_opencode, &central]);
     for name in &names {
         let blacklist_key = format!("commands/{name}");
         let mut variants: Vec<MarkdownVariant> = Vec::new();
@@ -81,6 +86,7 @@ pub(crate) fn sync_commands_with_reserved_codex_skill_names(
             (TOOL_CLAUDE, &claude),
             (TOOL_CURSOR, &cursor),
             (TOOL_OPENCODE, &opencode),
+            (TOOL_OPENCODE_LEGACY, &legacy_opencode),
         ] {
             if let Some(path) = map.get(name) {
                 variants.push(read_markdown_variant(tool, path)?);
@@ -120,9 +126,7 @@ pub(crate) fn sync_commands_with_reserved_codex_skill_names(
             let target_path = base_dir.join(name);
             let existing = variants
                 .iter()
-                .find(|variant| {
-                    variant.tool == tool && (tool != TOOL_CODEX || variant.path == target_path)
-                })
+                .find(|variant| variant.tool == tool && variant.path == target_path)
                 .map(|variant| &variant.doc);
             let label = format!("commands: {}", target_path.display());
             let updated = update_markdown_target(
@@ -473,6 +477,60 @@ mod tests {
         assert_eq!(
             read_body(&cfg.opencode_commands_dir.join("review.md"))?,
             "Review body"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn sync_commands_imports_legacy_only_command() -> io::Result<()> {
+        let (_tmp, mut cfg) = setup()?;
+        let legacy_dir = cfg.opencode_commands_dir.with_file_name("command");
+        cfg.opencode_legacy_commands_dir = Some(legacy_dir.clone());
+        write_plain(&legacy_dir.join("review.md"), &doc("legacy", "Legacy body"))?;
+
+        sync_commands(&cfg, LogMode::Quiet)?;
+
+        assert_eq!(
+            read_body(&cfg.opencode_commands_dir.join("review.md"))?,
+            "Legacy body"
+        );
+        assert_eq!(
+            read_body(&cfg.central_dir.join("review.md"))?,
+            "Legacy body"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn sync_commands_reports_conflict_between_plural_and_legacy_paths() -> io::Result<()> {
+        let (_tmp, mut cfg) = setup()?;
+        let legacy_dir = cfg.opencode_commands_dir.with_file_name("command");
+        cfg.opencode_legacy_commands_dir = Some(legacy_dir.clone());
+        let plural = cfg.opencode_commands_dir.join("review.md");
+        let legacy = legacy_dir.join("review.md");
+        write_plain(&plural, &doc("plural", "Plural body"))?;
+        write_plain(&legacy, &doc("legacy", "Legacy body"))?;
+        crate::sync::test_support::set_mtime(&plural, 100)?;
+        crate::sync::test_support::set_mtime(&legacy, 101)?;
+
+        let mut history = None;
+        let mut conflicts = Vec::new();
+        sync_commands_with_mode(
+            &cfg,
+            LogMode::Quiet,
+            ExecutionMode::Plan,
+            &mut history,
+            &mut conflicts,
+        )?;
+
+        assert_eq!(
+            conflicts,
+            vec![SyncConflict {
+                kind: SyncItemKind::Command,
+                name: "review.md".to_string(),
+                winner: TOOL_OPENCODE_LEGACY,
+                others: vec![TOOL_OPENCODE],
+            }]
         );
         Ok(())
     }

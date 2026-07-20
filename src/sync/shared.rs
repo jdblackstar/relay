@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 pub(crate) const TOOL_CENTRAL: &str = "central";
+pub(crate) const TOOL_OPENCODE_LEGACY: &str = "opencode (legacy path)";
 pub(crate) const CONFLICT_WINDOW_NS: u128 = 2_000_000_000;
 
 pub(crate) struct MarkdownDoc {

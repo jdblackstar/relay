@@ -49,6 +49,11 @@ only.
 - Relay follows `XDG_CONFIG_HOME` for config-style paths.
 - If `XDG_CONFIG_HOME` is not set, relay uses `$HOME/.config`.
 - `XDG_HOME` is not a standard XDG variable.
+- Existing configs that use OpenCode's former default `command` and `skill`
+  directories write to the current plural directories while continuing to read
+  and watch the legacy paths during migration. Custom paths are left unchanged.
+  After a successful sync, update those config values to `commands` and `skills`
+  to stop watching the legacy paths.
 - In `config.toml` and path env vars, use concrete paths or supported forms:
   `~`, `$HOME`, `${HOME}`, `$XDG_CONFIG_HOME`, `${XDG_CONFIG_HOME}`, and
   `${XDG_CONFIG_HOME:-$HOME/.config}`.

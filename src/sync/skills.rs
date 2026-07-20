@@ -1,7 +1,7 @@
 use super::shared::{
     collect_names, conflict_for_variants, file_mtime_value_from_meta, hash_bytes, list_if,
     log_action, read_markdown, read_visible_entry, required_frontmatter_hash,
-    select_frontmatter_for_target, tool_order, write_file, TOOL_CENTRAL,
+    select_frontmatter_for_target, tool_order, write_file, TOOL_CENTRAL, TOOL_OPENCODE_LEGACY,
 };
 use super::{ExecutionMode, LogMode as SyncLogMode, SyncConflict, SyncItemKind, SyncStats};
 use crate::config::{Config, TOOL_CLAUDE, TOOL_CODEX, TOOL_OPENCODE};
@@ -80,6 +80,10 @@ pub(crate) fn sync_skills_with_mode(
         &cfg.opencode_skills_dir,
         list_skill_dirs,
     )?;
+    let legacy_opencode = match cfg.opencode_legacy_skills_dir.as_deref() {
+        Some(dir) if cfg.tool_enabled(TOOL_OPENCODE) && dir.exists() => list_skill_dirs(dir)?,
+        _ => HashMap::new(),
+    };
     let codex = list_if(codex_read_enabled, &cfg.codex_skills_dir, list_skill_dirs)?;
     let central = if cfg.central_skills_dir.exists() {
         list_skill_dirs(&cfg.central_skills_dir)?
@@ -87,13 +91,14 @@ pub(crate) fn sync_skills_with_mode(
         HashMap::new()
     };
 
-    let names = collect_names(&[&claude, &opencode, &codex, &central]);
+    let names = collect_names(&[&claude, &opencode, &legacy_opencode, &codex, &central]);
     for name in names {
         let mut variants: Vec<SkillVariant> = Vec::new();
         for (tool, map) in [
             (TOOL_CENTRAL, &central),
             (TOOL_CLAUDE, &claude),
             (TOOL_OPENCODE, &opencode),
+            (TOOL_OPENCODE_LEGACY, &legacy_opencode),
             (TOOL_CODEX, &codex),
         ] {
             if let Some(path) = map.get(&name) {
@@ -174,6 +179,19 @@ pub(super) fn codex_real_skill_names(cfg: &Config) -> io::Result<HashSet<String>
             }
         }
     }
+    if cfg.tool_enabled(TOOL_OPENCODE) {
+        if let Some(dir) = cfg
+            .opencode_legacy_skills_dir
+            .as_deref()
+            .filter(|dir| dir.exists())
+        {
+            for name in list_skill_dirs(dir)?.into_keys() {
+                if !cfg.is_blacklisted(&format!("skills/{name}"), TOOL_CODEX) {
+                    names.insert(name);
+                }
+            }
+        }
+    }
 
     Ok(names)
 }
@@ -200,7 +218,7 @@ fn sync_skill_for_tool(
     let target_path = base_dir.join(name);
     let existing = variants
         .iter()
-        .find(|variant| variant.tool == tool)
+        .find(|variant| variant.tool == tool && variant.path == target_path)
         .map(|variant| variant.digest);
     sync_skill_target(
         &winner.path,
@@ -543,6 +561,63 @@ mod tests {
         assert_eq!(
             read_markdown(&cfg.opencode_skills_dir.join("plan/SKILL.md"))?.body,
             "Body"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn sync_skills_imports_legacy_only_skill() -> io::Result<()> {
+        let (_tmp, mut cfg) = setup()?;
+        let legacy_dir = cfg.opencode_skills_dir.with_file_name("skill");
+        cfg.opencode_legacy_skills_dir = Some(legacy_dir.clone());
+        write_skill(&legacy_dir, "plan", &doc("legacy", "Legacy body"))?;
+
+        assert!(codex_real_skill_names(&cfg)?.contains("plan"));
+        sync_skills(&cfg, SyncLogMode::Quiet)?;
+
+        assert_eq!(
+            read_markdown(&cfg.opencode_skills_dir.join("plan/SKILL.md"))?.body,
+            "Legacy body"
+        );
+        assert_eq!(
+            read_markdown(&cfg.central_skills_dir.join("plan/SKILL.md"))?.body,
+            "Legacy body"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn sync_skills_reports_conflict_between_plural_and_legacy_paths() -> io::Result<()> {
+        let (_tmp, mut cfg) = setup()?;
+        let legacy_dir = cfg.opencode_skills_dir.with_file_name("skill");
+        cfg.opencode_legacy_skills_dir = Some(legacy_dir.clone());
+        let plural = write_skill(
+            &cfg.opencode_skills_dir,
+            "plan",
+            &doc("plural", "Plural body"),
+        )?;
+        let legacy = write_skill(&legacy_dir, "plan", &doc("legacy", "Legacy body"))?;
+        crate::sync::test_support::set_mtime(&plural.join("SKILL.md"), 100)?;
+        crate::sync::test_support::set_mtime(&legacy.join("SKILL.md"), 101)?;
+
+        let mut history = None;
+        let mut conflicts = Vec::new();
+        sync_skills_with_mode(
+            &cfg,
+            SyncLogMode::Quiet,
+            ExecutionMode::Plan,
+            &mut history,
+            &mut conflicts,
+        )?;
+
+        assert_eq!(
+            conflicts,
+            vec![SyncConflict {
+                kind: SyncItemKind::Skill,
+                name: "plan".to_string(),
+                winner: TOOL_OPENCODE_LEGACY,
+                others: vec![TOOL_OPENCODE],
+            }]
         );
         Ok(())
     }
