@@ -511,10 +511,11 @@ pub(super) fn codex_real_skill_names(cfg: &Config) -> io::Result<HashSet<String>
 
 pub(super) fn codex_skills_target_enabled(cfg: &Config) -> bool {
     cfg.tool_enabled(TOOL_CODEX)
-        && cfg
-            .codex_skills_dir
-            .parent()
-            .is_some_and(|parent| parent.exists())
+        && (cfg.codex_skills_dir == cfg.central_skills_dir
+            || cfg
+                .codex_skills_dir
+                .parent()
+                .is_some_and(|parent| parent.exists()))
 }
 
 fn select_skill_winner(variants: &[SkillVariant]) -> &SkillVariant {
