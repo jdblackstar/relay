@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Filter unrelated filesystem watch events ([#20](https://github.com/jdblackstar/relay/pull/20))
+- Use `~/.agents/skills` as the canonical user skill store, with legacy imports,
+  compatibility adapters, reconciliation state, tombstones, and diagnostics.
 
 ## [0.2.5] - 2026-07-03
 

@@ -277,6 +277,21 @@ mod tests {
     }
 
     #[test]
+    fn sync_commands_creates_shared_skill_store_on_fresh_install() -> io::Result<()> {
+        let (tmp, mut cfg) = setup()?;
+        cfg.central_skills_dir = tmp.path().join("fresh-home/.agents/skills");
+        cfg.codex_skills_dir = cfg.central_skills_dir.clone();
+        assert!(!cfg.central_skills_dir.parent().unwrap().exists());
+
+        write_plain(&cfg.central_dir.join("review.md"), "Review command body.")?;
+
+        sync_commands(&cfg, LogMode::Quiet)?;
+
+        assert!(cfg.central_skills_dir.join("review/SKILL.md").exists());
+        Ok(())
+    }
+
+    #[test]
     fn sync_commands_blacklist_skips_codex_skill_wrapper() -> io::Result<()> {
         let (_tmp, mut cfg) = setup()?;
 

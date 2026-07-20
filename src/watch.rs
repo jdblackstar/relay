@@ -18,15 +18,18 @@ use std::time::{Duration, Instant};
 
 pub(crate) fn build_watch_list(cfg: &Config) -> Vec<(PathBuf, RecursiveMode)> {
     let mut paths = Vec::new();
+    let mut push_unique = |path: PathBuf, mode: RecursiveMode| {
+        if path.exists() && !paths.iter().any(|(existing, _)| existing == &path) {
+            paths.push((path, mode));
+        }
+    };
     for (path, mode) in [
         (&cfg.central_dir, RecursiveMode::NonRecursive),
         (&cfg.central_skills_dir, RecursiveMode::Recursive),
         (&cfg.central_agents_dir, RecursiveMode::Recursive),
         (&cfg.central_rules_dir, RecursiveMode::Recursive),
     ] {
-        if path.exists() {
-            paths.push((path.clone(), mode));
-        }
+        push_unique(path.clone(), mode);
     }
 
     for definition in TOOL_DEFINITIONS.iter() {
@@ -34,9 +37,12 @@ pub(crate) fn build_watch_list(cfg: &Config) -> Vec<(PathBuf, RecursiveMode)> {
             continue;
         }
         for (path, mode) in tool_watch_paths(cfg, definition) {
-            if path.exists() {
-                paths.push((path, mode));
-            }
+            push_unique(path, mode);
+        }
+    }
+    if let Ok(import_dirs) = cfg.legacy_skill_import_dirs() {
+        for path in import_dirs {
+            push_unique(path, RecursiveMode::Recursive);
         }
     }
     paths
@@ -91,6 +97,14 @@ fn classify_origin(cfg: &Config, path: &Path) -> Option<String> {
     for (label, file) in files {
         if path == file {
             return Some(format!("watch:{label}"));
+        }
+    }
+
+    if let Ok(import_dirs) = cfg.legacy_skill_import_dirs() {
+        for root in import_dirs {
+            if let Some(origin) = format_origin(path, &root, "skill_import") {
+                return Some(origin);
+            }
         }
     }
 

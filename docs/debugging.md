@@ -51,6 +51,20 @@ relay daemon status
 relay status
 ```
 
+The status output includes skill reconciliation diagnostics:
+
+- `canonical`: the user-owned shared store and number of valid skills
+- `tombstones`: canonical deletions remembered by Relay
+- `role=adapter`: compatibility destinations Relay may write
+- `owned` / `divergent`: adapter copies tracked by Relay and copies changed
+  since the last reconciliation
+- `role=import` / `collisions`: legacy/native migration sources and names whose
+  content differs from the canonical skill
+
+Recreating a canonical skill clears its tombstone. If a divergent adapter was
+preserved after a canonical deletion, compare it manually before deciding
+whether to restore it into `~/.agents/skills`.
+
 Quick path (install + start):
 
 ```sh
