@@ -119,7 +119,7 @@ fi
 
 # The first central write happens before the rest of a sync finishes. Wait for
 # the final targets too so the test does not mutate the probe mid-reconciliation.
-wait_for_file "$OPENCODE_HOME/command/watch-probe.md" "$watch_log"
+wait_for_file "$OPENCODE_HOME/commands/watch-probe.md" "$watch_log"
 wait_for_file "$HOME/.agents/skills/watch-probe/SKILL.md" "$watch_log"
 
 # Write test file with retry logic
@@ -149,7 +149,7 @@ if ! write_test_file; then
 fi
 
 wait_for_file "$HOME/.agents/skills/watch-e2e/SKILL.md" "$watch_log"
-wait_for_file "$OPENCODE_HOME/command/watch-e2e.md" "$watch_log"
+wait_for_file "$OPENCODE_HOME/commands/watch-e2e.md" "$watch_log"
 
 if ! grep -q "Claude watch e2e command." "$HOME/.config/relay/commands/watch-e2e.md"; then
     echo "error: watch e2e content missing in central" >&2
@@ -158,7 +158,7 @@ fi
 
 assert_codex_command_skill_wrapper "watch-e2e" "Claude watch e2e command."
 
-if ! grep -q "Claude watch e2e command." "$OPENCODE_HOME/command/watch-e2e.md"; then
+if ! grep -q "Claude watch e2e command." "$OPENCODE_HOME/commands/watch-e2e.md"; then
     echo "error: watch e2e content missing in opencode" >&2
     exit 1
 fi
@@ -170,7 +170,7 @@ rm -f \
     "$probe_file" \
     "$HOME/.config/relay/commands/watch-probe.md" \
     "$CURSOR_HOME/commands/watch-probe.md" \
-    "$OPENCODE_HOME/command/watch-probe.md"
+    "$OPENCODE_HOME/commands/watch-probe.md"
 rm -rf "$HOME/.agents/skills/watch-probe"
 
 echo "e2e test ok"

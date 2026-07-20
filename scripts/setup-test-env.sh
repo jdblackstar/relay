@@ -21,8 +21,8 @@ mkdir -p \
   "${HOME_DIR}/.codex/skills" \
   "${HOME_DIR}/.codex/rules" \
   "${HOME_DIR}/.cursor/commands" \
-  "${HOME_DIR}/.config/opencode/command" \
-  "${HOME_DIR}/.config/opencode/skill"
+  "${HOME_DIR}/.config/opencode/commands" \
+  "${HOME_DIR}/.config/opencode/skills"
 
 cat > "${BIN_DIR}/codex" <<'EOF'
 #!/usr/bin/env bash
@@ -57,7 +57,7 @@ central_rules_dir = "${HOME_DIR}/.config/relay/rules"
 claude_dir = "${HOME_DIR}/.claude/commands"
 claude_skills_dir = "${HOME_DIR}/.claude/skills"
 cursor_dir = "${HOME_DIR}/.cursor/commands"
-opencode_commands_dir = "${HOME_DIR}/.config/opencode/command"
+opencode_commands_dir = "${HOME_DIR}/.config/opencode/commands"
 opencode_skills_dir = "${HOME_DIR}/.agents/skills"
 opencode_agents_file = "${HOME_DIR}/.config/opencode/AGENTS.md"
 codex_skills_dir = "${HOME_DIR}/.agents/skills"

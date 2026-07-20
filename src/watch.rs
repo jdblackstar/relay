@@ -1,4 +1,4 @@
-use crate::config::Config;
+use crate::config::{Config, TOOL_OPENCODE};
 use crate::sync::LogMode;
 use crate::tools::{ToolDefinition, TOOL_DEFINITIONS};
 use notify::RecursiveMode;
@@ -45,6 +45,15 @@ pub(crate) fn build_watch_list(cfg: &Config) -> Vec<(PathBuf, RecursiveMode)> {
             push_unique(path, RecursiveMode::Recursive);
         }
     }
+    if cfg.tool_enabled(TOOL_OPENCODE) {
+        if let Some(path) = cfg
+            .opencode_legacy_commands_dir
+            .as_ref()
+            .filter(|path| path.exists())
+        {
+            push_unique(path.clone(), RecursiveMode::NonRecursive);
+        }
+    }
     paths
 }
 
@@ -87,6 +96,14 @@ fn classify_origin(cfg: &Config, path: &Path) -> Option<String> {
         if let Some(origin) = format_origin(path, root, label) {
             return Some(origin);
         }
+    }
+
+    if let Some(origin) = cfg
+        .opencode_legacy_commands_dir
+        .as_deref()
+        .and_then(|root| format_origin(path, root, "opencode_legacy"))
+    {
+        return Some(origin);
     }
 
     let files: [(&str, &Path); 3] = [
@@ -134,6 +151,7 @@ fn tool_watch_paths(cfg: &Config, tool: &ToolDefinition) -> Vec<(PathBuf, Recurs
 
 #[cfg(not(any(test, coverage)))]
 pub(crate) fn watch(cfg: &Config, debounce_ms: u64, log_mode: LogMode) -> io::Result<()> {
+    ensure_migration_watch_targets(cfg)?;
     let (tx, rx) = mpsc::channel();
     let mut watcher = RecommendedWatcher::new(
         move |res| {
@@ -208,7 +226,20 @@ pub(crate) fn watch(cfg: &Config, debounce_ms: u64, log_mode: LogMode) -> io::Re
 
 #[cfg(any(test, coverage))]
 pub(crate) fn watch(cfg: &Config, _debounce_ms: u64, _log_mode: LogMode) -> io::Result<()> {
+    ensure_migration_watch_targets(cfg)?;
     let _ = build_watch_list(cfg);
+    Ok(())
+}
+
+fn ensure_migration_watch_targets(cfg: &Config) -> io::Result<()> {
+    if cfg.tool_enabled(TOOL_OPENCODE)
+        && cfg
+            .opencode_legacy_commands_dir
+            .as_ref()
+            .is_some_and(|path| path.exists())
+    {
+        std::fs::create_dir_all(&cfg.opencode_commands_dir)?;
+    }
     Ok(())
 }
 
@@ -240,6 +271,7 @@ mod tests {
             claude_skills_dir: tmp.path().join("claude_skills"),
             cursor_dir: tmp.path().join("cursor"),
             opencode_commands_dir: tmp.path().join("opencode_commands"),
+            opencode_legacy_commands_dir: None,
             opencode_skills_dir: tmp.path().join("opencode_skills"),
             opencode_agents_file: tmp.path().join("opencode_agents/AGENTS.md"),
             codex_skills_dir: tmp.path().join("codex_skills"),
@@ -251,7 +283,8 @@ mod tests {
     #[test]
     fn build_watch_list_includes_expected_paths() -> io::Result<()> {
         let tmp = TempDir::new()?;
-        let cfg = make_config(&tmp);
+        let mut cfg = make_config(&tmp);
+        cfg.opencode_legacy_commands_dir = Some(tmp.path().join("opencode/command"));
         fs::create_dir_all(&cfg.central_dir)?;
         fs::create_dir_all(&cfg.central_skills_dir)?;
         fs::create_dir_all(&cfg.central_agents_dir)?;
@@ -259,6 +292,7 @@ mod tests {
         fs::create_dir_all(&cfg.claude_dir)?;
         fs::create_dir_all(&cfg.claude_skills_dir)?;
         fs::create_dir_all(&cfg.opencode_commands_dir)?;
+        fs::create_dir_all(cfg.opencode_legacy_commands_dir.as_ref().unwrap())?;
         fs::create_dir_all(&cfg.opencode_skills_dir)?;
         fs::create_dir_all(cfg.opencode_agents_file.parent().unwrap())?;
         fs::create_dir_all(&cfg.codex_skills_dir)?;
@@ -276,6 +310,10 @@ mod tests {
             cfg.opencode_commands_dir.clone(),
             RecursiveMode::NonRecursive
         )));
+        assert!(paths.contains(&(
+            cfg.opencode_legacy_commands_dir.clone().unwrap(),
+            RecursiveMode::NonRecursive
+        )));
         assert!(paths.contains(&(cfg.opencode_skills_dir.clone(), RecursiveMode::Recursive)));
         assert!(paths.contains(&(
             cfg.opencode_agents_file.parent().unwrap().to_path_buf(),
@@ -290,6 +328,18 @@ mod tests {
             cfg.codex_agents_file.parent().unwrap().to_path_buf(),
             RecursiveMode::NonRecursive
         )));
+        assert_eq!(
+            watch_origin(
+                &cfg,
+                &[cfg
+                    .opencode_legacy_commands_dir
+                    .as_ref()
+                    .unwrap()
+                    .join("review.md")]
+            )
+            .as_deref(),
+            Some("watch:opencode_legacy:review.md")
+        );
         Ok(())
     }
 
@@ -298,6 +348,25 @@ mod tests {
         let tmp = TempDir::new()?;
         let cfg = make_config(&tmp);
         watch(&cfg, 10, LogMode::Quiet)
+    }
+
+    #[test]
+    fn watch_creates_missing_migration_target() -> io::Result<()> {
+        let tmp = TempDir::new()?;
+        let mut cfg = make_config(&tmp);
+        let legacy = tmp.path().join("opencode/command");
+        cfg.opencode_commands_dir = tmp.path().join("opencode/commands");
+        cfg.opencode_legacy_commands_dir = Some(legacy.clone());
+        fs::create_dir_all(legacy)?;
+
+        watch(&cfg, 10, LogMode::Quiet)?;
+
+        assert!(cfg.opencode_commands_dir.is_dir());
+        assert!(build_watch_list(&cfg).contains(&(
+            cfg.opencode_commands_dir.clone(),
+            RecursiveMode::NonRecursive
+        )));
+        Ok(())
     }
 
     #[test]

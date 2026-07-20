@@ -24,6 +24,8 @@ pub(crate) struct Config {
     pub claude_skills_dir: PathBuf,
     pub cursor_dir: PathBuf,
     pub opencode_commands_dir: PathBuf,
+    #[serde(skip)]
+    pub opencode_legacy_commands_dir: Option<PathBuf>,
     pub opencode_skills_dir: PathBuf,
     pub opencode_agents_file: PathBuf,
     pub codex_skills_dir: PathBuf,
@@ -89,7 +91,8 @@ impl Config {
             claude_dir: claude_root.join("commands"),
             claude_skills_dir: claude_root.join("skills"),
             cursor_dir: cursor_root.join("commands"),
-            opencode_commands_dir: opencode_root.join("command"),
+            opencode_commands_dir: opencode_root.join("commands"),
+            opencode_legacy_commands_dir: None,
             opencode_skills_dir: home.join(".agents/skills"),
             opencode_agents_file: opencode_root.join("AGENTS.md"),
             codex_skills_dir: home.join(".agents/skills"),
@@ -179,6 +182,11 @@ impl Config {
             } else {
                 configured_central_skills
             };
+        let (opencode_commands_dir, opencode_legacy_commands_dir) = resolve_opencode_dir(
+            cfg.opencode_commands_dir.or(legacy_command_dir),
+            &defaults.opencode_commands_dir,
+            "command",
+        );
         Ok(Self {
             enabled_tools: normalize_tools(
                 cfg.enabled_tools
@@ -198,10 +206,8 @@ impl Config {
             claude_dir: cfg.claude_dir.unwrap_or(defaults.claude_dir),
             claude_skills_dir: cfg.claude_skills_dir.unwrap_or(defaults.claude_skills_dir),
             cursor_dir: cfg.cursor_dir.unwrap_or(defaults.cursor_dir),
-            opencode_commands_dir: cfg
-                .opencode_commands_dir
-                .or(legacy_command_dir)
-                .unwrap_or(defaults.opencode_commands_dir),
+            opencode_commands_dir,
+            opencode_legacy_commands_dir,
             opencode_skills_dir: cfg
                 .opencode_skills_dir
                 .or(legacy_skill_dir)
@@ -225,7 +231,11 @@ impl Config {
     #[inline(never)]
     pub(crate) fn save(&self, path: &Path) -> io::Result<()> {
         path.parent().map(fs::create_dir_all).transpose()?;
-        let serialized = toml::to_string_pretty(self).map_err(serialize_error)?;
+        let mut persisted = self.clone();
+        if let Some(legacy_dir) = &self.opencode_legacy_commands_dir {
+            persisted.opencode_commands_dir = legacy_dir.clone();
+        }
+        let serialized = toml::to_string_pretty(&persisted).map_err(serialize_error)?;
         fs::write(path, serialized)
     }
 }
@@ -312,6 +322,20 @@ fn classify_legacy_opencode_dir(path: Option<&Path>) -> Option<LegacyOpencodeDir
         Some("command") | Some("commands") => Some(LegacyOpencodeDir::Commands(path.to_path_buf())),
         Some("skill") | Some("skills") => Some(LegacyOpencodeDir::Skills(path.to_path_buf())),
         _ => None,
+    }
+}
+
+fn resolve_opencode_dir(
+    configured: Option<PathBuf>,
+    default: &Path,
+    legacy_name: &str,
+) -> (PathBuf, Option<PathBuf>) {
+    match configured {
+        Some(path) if path == default.with_file_name(legacy_name) => {
+            (default.to_path_buf(), Some(path))
+        }
+        Some(path) => (path, None),
+        None => (default.to_path_buf(), None),
     }
 }
 
@@ -685,6 +709,7 @@ mod tests {
             claude_skills_dir: PathBuf::from("/tmp/claude_skills"),
             cursor_dir: PathBuf::from("/tmp/cursor"),
             opencode_commands_dir: PathBuf::from("/tmp/oc"),
+            opencode_legacy_commands_dir: None,
             opencode_skills_dir: PathBuf::from("/tmp/os"),
             opencode_agents_file: PathBuf::from("/tmp/oa"),
             codex_skills_dir: PathBuf::from("/tmp/codex_skills"),
@@ -737,7 +762,7 @@ mod tests {
         assert_eq!(cfg.claude_skills_dir, home.join("claude_root/skills"));
         assert_eq!(
             cfg.opencode_commands_dir,
-            home.join("opencode_root/command")
+            home.join("opencode_root/commands")
         );
         assert_eq!(cfg.opencode_skills_dir, home.join(".agents/skills"));
         assert_eq!(
@@ -966,6 +991,60 @@ opencode_dir = "/legacy/opencode/command"
         assert!(cfg
             .legacy_skill_import_dirs()?
             .contains(&home.join(".config/relay/skills")));
+        set_env("RELAY_HOME", None);
+        Ok(())
+    }
+
+    #[test]
+    fn load_normalizes_legacy_opencode_default_command_dir() -> io::Result<()> {
+        let _lock = env_lock();
+        let tmp = TempDir::new()?;
+        let home = tmp.path().join("home");
+        fs::create_dir_all(home.join(".config/relay"))?;
+        set_env("RELAY_HOME", Some(home.to_string_lossy().as_ref()));
+
+        let config_path = Config::config_path()?;
+        fs::write(
+            &config_path,
+            "opencode_commands_dir = \"~/.config/opencode/command\"\n",
+        )?;
+
+        let cfg = Config::load_or_default()?;
+        assert_eq!(
+            cfg.opencode_commands_dir,
+            home.join(".config/opencode/commands")
+        );
+        assert_eq!(
+            cfg.opencode_legacy_commands_dir,
+            Some(home.join(".config/opencode/command"))
+        );
+        assert_eq!(cfg.opencode_skills_dir, home.join(".agents/skills"));
+
+        set_env("RELAY_HOME", None);
+        Ok(())
+    }
+
+    #[test]
+    fn load_preserves_custom_opencode_command_dir() -> io::Result<()> {
+        let _lock = env_lock();
+        let tmp = TempDir::new()?;
+        let home = tmp.path().join("home");
+        fs::create_dir_all(home.join(".config/relay"))?;
+        set_env("RELAY_HOME", Some(home.to_string_lossy().as_ref()));
+
+        let config_path = Config::config_path()?;
+        fs::write(
+            &config_path,
+            "opencode_commands_dir = \"/custom/opencode/command\"\n",
+        )?;
+
+        let cfg = Config::load_or_default()?;
+        assert_eq!(
+            cfg.opencode_commands_dir,
+            PathBuf::from("/custom/opencode/command")
+        );
+        assert_eq!(cfg.opencode_legacy_commands_dir, None);
+
         set_env("RELAY_HOME", None);
         Ok(())
     }
@@ -1359,11 +1438,30 @@ opencode_dir = "/tmp/opencode/other"
         let home = tmp.path().join("home");
         fs::create_dir_all(&home)?;
         set_env("RELAY_HOME", Some(home.to_string_lossy().as_ref()));
-        let cfg = Config::default_paths()?;
+        let mut cfg = Config::default_paths()?;
+        cfg.opencode_legacy_commands_dir = Some(home.join(".config/opencode/command"));
         let path = tmp.path().join("relay/config.toml");
         cfg.save(&path)?;
-        let contents = fs::read_to_string(path)?;
+        let contents = fs::read_to_string(&path)?;
         assert!(contents.contains("central_dir"));
+        assert!(!contents.contains("opencode_legacy_commands_dir"));
+        assert!(contents.contains(
+            format!(
+                "opencode_commands_dir = \"{}\"",
+                home.join(".config/opencode/command").display()
+            )
+            .as_str()
+        ));
+
+        let reloaded = Config::load_from_file(&path)?;
+        assert_eq!(
+            reloaded.opencode_commands_dir,
+            home.join(".config/opencode/commands")
+        );
+        assert_eq!(
+            reloaded.opencode_legacy_commands_dir,
+            Some(home.join(".config/opencode/command"))
+        );
         set_env("RELAY_HOME", None);
         Ok(())
     }

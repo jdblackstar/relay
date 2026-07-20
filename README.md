@@ -11,7 +11,7 @@ Commands:
 - Central store: `~/.config/relay/commands`
 - Claude commands: `$CLAUDE_HOME/commands` (default `~/.claude/commands`)
 - Cursor commands: `$CURSOR_HOME/commands` (default `~/.cursor/commands`)
-- OpenCode commands: `$OPENCODE_HOME/command` (default `~/.config/opencode/command`)
+- OpenCode commands: `$OPENCODE_HOME/commands` (default `~/.config/opencode/commands`)
 - Codex command skill wrappers: `~/.agents/skills/<name>/SKILL.md` by default
 
 Skills:
@@ -42,8 +42,8 @@ wrapper. Skills are stored as directories named after the skill, with a
 `SKILL.md` inside (e.g. `review/SKILL.md`). Relay does not create redundant
 Codex or OpenCode copies when those clients use the shared store.
 Claude and OpenCode also read project commands from `.claude/commands/` and
-`.opencode/command/`, plus project skills from `.claude/skills/<name>/SKILL.md`
-and `.opencode/skill/<name>/SKILL.md`; relay currently syncs global locations
+`.opencode/commands/`, plus project skills from `.claude/skills/<name>/SKILL.md`
+and `.opencode/skills/<name>/SKILL.md`; relay currently syncs global locations
 only.
 
 ### XDG Notes
@@ -51,6 +51,10 @@ only.
 - Relay follows `XDG_CONFIG_HOME` for config-style paths.
 - If `XDG_CONFIG_HOME` is not set, relay uses `$HOME/.config`.
 - `XDG_HOME` is not a standard XDG variable.
+- Existing configs that use OpenCode's former default `command` directory write
+  to `commands` while continuing to read and watch the legacy path during
+  migration. Custom paths are left unchanged. After a successful sync, update
+  that config value to `commands` to stop watching the legacy path.
 - In `config.toml` and path env vars, use concrete paths or supported forms:
   `~`, `$HOME`, `${HOME}`, `$XDG_CONFIG_HOME`, `${XDG_CONFIG_HOME}`, and
   `${XDG_CONFIG_HOME:-$HOME/.config}`.
