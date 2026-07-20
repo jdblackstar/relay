@@ -46,8 +46,8 @@ wait_for_file() {
 assert_codex_command_skill_wrapper() {
     local name="$1"
     local expected_body="$2"
-    local skill_path="$CODEX_HOME/skills/${name}/SKILL.md"
-    local marker_path="$CODEX_HOME/skills/${name}/.relay-command"
+    local skill_path="$HOME/.agents/skills/${name}/SKILL.md"
+    local marker_path="$HOME/.agents/skills/${name}/.relay-command"
 
     if [[ ! -f "$skill_path" ]]; then
         echo "error: missing codex command skill wrapper at $skill_path" >&2
@@ -76,9 +76,11 @@ cargo build
 
 test -f "$HOME/.config/relay/commands/claude-sandbox.md"
 test -f "$HOME/.config/relay/commands/opencode-sandbox.md"
-test -d "$HOME/.config/relay/skills/codex-sandbox"
-test -d "$HOME/.config/relay/skills/claude-sandbox"
-test -d "$HOME/.config/relay/skills/opencode-sandbox"
+test -d "$HOME/.agents/skills/codex-sandbox"
+test -d "$HOME/.agents/skills/claude-sandbox"
+test -d "$HOME/.agents/skills/opencode-sandbox"
+test ! -d "$CODEX_HOME/skills/claude-sandbox"
+test ! -d "$OPENCODE_HOME/skill/claude-sandbox"
 test -f "$HOME/.config/relay/agents/codex/AGENTS.md"
 test -f "$HOME/.config/relay/agents/opencode/AGENTS.md"
 test -f "$HOME/.config/relay/rules/codex/default.rules"
@@ -115,13 +117,10 @@ if ! write_probe_file; then
     exit 1
 fi
 
-# Clean up probe file
-rm -f \
-    "$probe_file" \
-    "$HOME/.config/relay/commands/watch-probe.md" \
-    "$CURSOR_HOME/commands/watch-probe.md" \
-    "$OPENCODE_HOME/commands/watch-probe.md"
-rm -rf "$CODEX_HOME/skills/watch-probe"
+# The first central write happens before the rest of a sync finishes. Wait for
+# the final targets too so the test does not mutate the probe mid-reconciliation.
+wait_for_file "$OPENCODE_HOME/commands/watch-probe.md" "$watch_log"
+wait_for_file "$HOME/.agents/skills/watch-probe/SKILL.md" "$watch_log"
 
 # Write test file with retry logic
 write_test_file() {
@@ -149,7 +148,7 @@ if ! write_test_file; then
     exit 1
 fi
 
-wait_for_file "$CODEX_HOME/skills/watch-e2e/SKILL.md" "$watch_log"
+wait_for_file "$HOME/.agents/skills/watch-e2e/SKILL.md" "$watch_log"
 wait_for_file "$OPENCODE_HOME/commands/watch-e2e.md" "$watch_log"
 
 if ! grep -q "Claude watch e2e command." "$HOME/.config/relay/commands/watch-e2e.md"; then
@@ -166,6 +165,12 @@ fi
 
 kill "$watch_pid" >/dev/null 2>&1 || true
 wait "$watch_pid" >/dev/null 2>&1 || true
-rm -f "$watch_log"
+rm -f \
+    "$watch_log" \
+    "$probe_file" \
+    "$HOME/.config/relay/commands/watch-probe.md" \
+    "$CURSOR_HOME/commands/watch-probe.md" \
+    "$OPENCODE_HOME/commands/watch-probe.md"
+rm -rf "$HOME/.agents/skills/watch-probe"
 
 echo "e2e test ok"

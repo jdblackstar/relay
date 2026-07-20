@@ -126,7 +126,9 @@ pub(crate) fn sync_commands_with_reserved_codex_skill_names(
             let target_path = base_dir.join(name);
             let existing = variants
                 .iter()
-                .find(|variant| variant.tool == tool && variant.path == target_path)
+                .find(|variant| {
+                    variant.tool == tool && (tool != TOOL_CODEX || variant.path == target_path)
+                })
                 .map(|variant| &variant.doc);
             let label = format!("commands: {}", target_path.display());
             let updated = update_markdown_target(
@@ -286,6 +288,21 @@ mod tests {
             read_body(&cfg.codex_skills_dir.join("review/SKILL.md"))?,
             "New"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn sync_commands_creates_shared_skill_store_on_fresh_install() -> io::Result<()> {
+        let (tmp, mut cfg) = setup()?;
+        cfg.central_skills_dir = tmp.path().join("fresh-home/.agents/skills");
+        cfg.codex_skills_dir = cfg.central_skills_dir.clone();
+        assert!(!cfg.central_skills_dir.parent().unwrap().exists());
+
+        write_plain(&cfg.central_dir.join("review.md"), "Review command body.")?;
+
+        sync_commands(&cfg, LogMode::Quiet)?;
+
+        assert!(cfg.central_skills_dir.join("review/SKILL.md").exists());
         Ok(())
     }
 

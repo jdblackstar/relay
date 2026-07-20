@@ -12,19 +12,18 @@ Keep this up to date as tooling changes.
 
 ## Commands (slash prompts)
 
-- Codex: `true`. Relay writes generated command skill wrappers at `$CODEX_HOME/skills/name/SKILL.md`. Generated wrappers include `.relay-command`, are ignored as skill sources, and are skipped when a real skill already owns the same name. Relay ignores old `$CODEX_HOME/prompts` command files.
+- Codex: `true`. Relay writes generated command skill wrappers into the configured Codex skill store (`~/.agents/skills` by default). Generated wrappers include `.relay-command`, are ignored as skill sources, and are skipped when a real skill already owns the same name. Relay ignores old `$CODEX_HOME/prompts` command files.
 - Claude: `true`. `/name` maps to `~/.claude/commands/name.md` and project `.claude/commands/`.
 - OpenCode: `true`. Global `~/.config/opencode/commands/name.md` and project `.opencode/commands/name.md`.
 - Cursor: not supported by relay (project-scoped rules only; skills incomplete).
 
 ## Skills (model-discoverable instructions)
 
-- Codex: `true`. `$CODEX_HOME/skills` (default `~/.codex/skills`). Higher level overrides lower (user > project > plugin).
-- Claude: `true`. `~/.claude/skills/<name>/SKILL.md` and project `.claude/skills/<name>/SKILL.md`.
+- Codex: `true`. Relay's default user store is `~/.agents/skills`; legacy `$CODEX_HOME/skills` is import-only during migration. Higher level overrides lower (user > project > plugin).
+- Claude: `true`. `~/.claude/skills/<name>/SKILL.md` and project `.claude/skills/<name>/SKILL.md`. Relay maintains the global directory as a read/write compatibility adapter for the canonical `~/.agents/skills` store.
   Requires `SKILL.md` with frontmatter `name:` and `description:`. Higher level overrides lower (user > project > plugin).
-- OpenCode: `true`. Project `.opencode/skills/<name>/SKILL.md` and global `~/.config/opencode/skills/<name>/SKILL.md`.
-  Also loads Claude-compatible skills from `.claude/skills/<name>/SKILL.md` (project + global).
-- Cursor: not supported by relay (project-scoped rules only; skills incomplete).
+- OpenCode: `true`. Relay's default user store is `~/.agents/skills`; legacy global `~/.config/opencode/skill/<name>/SKILL.md` and `skills/` are import-only during migration. Project `.opencode/skills/<name>/SKILL.md` remains project-owned.
+- Cursor: Relay does not maintain a tool-specific skill copy; shared-store discovery is preferred.
 
 ## AGENTS.md
 

@@ -18,15 +18,18 @@ use std::time::{Duration, Instant};
 
 pub(crate) fn build_watch_list(cfg: &Config) -> Vec<(PathBuf, RecursiveMode)> {
     let mut paths = Vec::new();
+    let mut push_unique = |path: PathBuf, mode: RecursiveMode| {
+        if path.exists() && !paths.iter().any(|(existing, _)| existing == &path) {
+            paths.push((path, mode));
+        }
+    };
     for (path, mode) in [
         (&cfg.central_dir, RecursiveMode::NonRecursive),
         (&cfg.central_skills_dir, RecursiveMode::Recursive),
         (&cfg.central_agents_dir, RecursiveMode::Recursive),
         (&cfg.central_rules_dir, RecursiveMode::Recursive),
     ] {
-        if path.exists() {
-            paths.push((path.clone(), mode));
-        }
+        push_unique(path.clone(), mode);
     }
 
     for definition in TOOL_DEFINITIONS.iter() {
@@ -34,25 +37,21 @@ pub(crate) fn build_watch_list(cfg: &Config) -> Vec<(PathBuf, RecursiveMode)> {
             continue;
         }
         for (path, mode) in tool_watch_paths(cfg, definition) {
-            if path.exists() {
-                paths.push((path, mode));
-            }
+            push_unique(path, mode);
+        }
+    }
+    if let Ok(import_dirs) = cfg.legacy_skill_import_dirs() {
+        for path in import_dirs {
+            push_unique(path, RecursiveMode::Recursive);
         }
     }
     if cfg.tool_enabled(TOOL_OPENCODE) {
-        for (path, mode) in [
-            (
-                cfg.opencode_legacy_commands_dir.as_ref(),
-                RecursiveMode::NonRecursive,
-            ),
-            (
-                cfg.opencode_legacy_skills_dir.as_ref(),
-                RecursiveMode::Recursive,
-            ),
-        ] {
-            if let Some(path) = path.filter(|path| path.exists()) {
-                paths.push((path.clone(), mode));
-            }
+        if let Some(path) = cfg
+            .opencode_legacy_commands_dir
+            .as_ref()
+            .filter(|path| path.exists())
+        {
+            push_unique(path.clone(), RecursiveMode::NonRecursive);
         }
     }
     paths
@@ -98,19 +97,13 @@ fn classify_origin(cfg: &Config, path: &Path) -> Option<String> {
             return Some(origin);
         }
     }
-    for (label, root) in [
-        (
-            "opencode_legacy",
-            cfg.opencode_legacy_commands_dir.as_deref(),
-        ),
-        (
-            "opencode_legacy_skills",
-            cfg.opencode_legacy_skills_dir.as_deref(),
-        ),
-    ] {
-        if let Some(origin) = root.and_then(|root| format_origin(path, root, label)) {
-            return Some(origin);
-        }
+
+    if let Some(origin) = cfg
+        .opencode_legacy_commands_dir
+        .as_deref()
+        .and_then(|root| format_origin(path, root, "opencode_legacy"))
+    {
+        return Some(origin);
     }
 
     let files: [(&str, &Path); 3] = [
@@ -121,6 +114,14 @@ fn classify_origin(cfg: &Config, path: &Path) -> Option<String> {
     for (label, file) in files {
         if path == file {
             return Some(format!("watch:{label}"));
+        }
+    }
+
+    if let Ok(import_dirs) = cfg.legacy_skill_import_dirs() {
+        for root in import_dirs {
+            if let Some(origin) = format_origin(path, &root, "skill_import") {
+                return Some(origin);
+            }
         }
     }
 
@@ -258,7 +259,6 @@ mod tests {
             opencode_commands_dir: tmp.path().join("opencode_commands"),
             opencode_legacy_commands_dir: None,
             opencode_skills_dir: tmp.path().join("opencode_skills"),
-            opencode_legacy_skills_dir: None,
             opencode_agents_file: tmp.path().join("opencode_agents/AGENTS.md"),
             codex_skills_dir: tmp.path().join("codex_skills"),
             codex_rules_file: tmp.path().join("codex_rules/default.rules"),
@@ -271,7 +271,6 @@ mod tests {
         let tmp = TempDir::new()?;
         let mut cfg = make_config(&tmp);
         cfg.opencode_legacy_commands_dir = Some(tmp.path().join("opencode/command"));
-        cfg.opencode_legacy_skills_dir = Some(tmp.path().join("opencode/skill"));
         fs::create_dir_all(&cfg.central_dir)?;
         fs::create_dir_all(&cfg.central_skills_dir)?;
         fs::create_dir_all(&cfg.central_agents_dir)?;
@@ -279,9 +278,8 @@ mod tests {
         fs::create_dir_all(&cfg.claude_dir)?;
         fs::create_dir_all(&cfg.claude_skills_dir)?;
         fs::create_dir_all(&cfg.opencode_commands_dir)?;
-        fs::create_dir_all(&cfg.opencode_skills_dir)?;
         fs::create_dir_all(cfg.opencode_legacy_commands_dir.as_ref().unwrap())?;
-        fs::create_dir_all(cfg.opencode_legacy_skills_dir.as_ref().unwrap())?;
+        fs::create_dir_all(&cfg.opencode_skills_dir)?;
         fs::create_dir_all(cfg.opencode_agents_file.parent().unwrap())?;
         fs::create_dir_all(&cfg.codex_skills_dir)?;
         fs::create_dir_all(cfg.codex_rules_file.parent().unwrap())?;
@@ -298,15 +296,11 @@ mod tests {
             cfg.opencode_commands_dir.clone(),
             RecursiveMode::NonRecursive
         )));
-        assert!(paths.contains(&(cfg.opencode_skills_dir.clone(), RecursiveMode::Recursive)));
         assert!(paths.contains(&(
             cfg.opencode_legacy_commands_dir.clone().unwrap(),
             RecursiveMode::NonRecursive
         )));
-        assert!(paths.contains(&(
-            cfg.opencode_legacy_skills_dir.clone().unwrap(),
-            RecursiveMode::Recursive
-        )));
+        assert!(paths.contains(&(cfg.opencode_skills_dir.clone(), RecursiveMode::Recursive)));
         assert!(paths.contains(&(
             cfg.opencode_agents_file.parent().unwrap().to_path_buf(),
             RecursiveMode::NonRecursive
@@ -331,18 +325,6 @@ mod tests {
             )
             .as_deref(),
             Some("watch:opencode_legacy:review.md")
-        );
-        assert_eq!(
-            watch_origin(
-                &cfg,
-                &[cfg
-                    .opencode_legacy_skills_dir
-                    .as_ref()
-                    .unwrap()
-                    .join("review/SKILL.md")]
-            )
-            .as_deref(),
-            Some("watch:opencode_legacy_skills:review/SKILL.md")
         );
         Ok(())
     }

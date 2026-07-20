@@ -179,9 +179,15 @@ pub(crate) fn resolve_tool_paths(cfg: &Config, relative_path: &str, tool: &str) 
             return paths;
         };
         match tool {
-            TOOL_CLAUDE => paths.push(cfg.claude_skills_dir.join(suffix)),
-            TOOL_CODEX => paths.push(cfg.codex_skills_dir.join(suffix)),
-            TOOL_OPENCODE => paths.push(cfg.opencode_skills_dir.join(suffix)),
+            TOOL_CLAUDE if cfg.claude_skills_dir != cfg.central_skills_dir => {
+                paths.push(cfg.claude_skills_dir.join(suffix))
+            }
+            TOOL_CODEX if cfg.codex_skills_dir != cfg.central_skills_dir => {
+                paths.push(cfg.codex_skills_dir.join(suffix))
+            }
+            TOOL_OPENCODE if cfg.opencode_skills_dir != cfg.central_skills_dir => {
+                paths.push(cfg.opencode_skills_dir.join(suffix))
+            }
             _ => {}
         }
     } else if is_supported_agents_blacklist_path(relative_path) {
@@ -271,6 +277,17 @@ mod tests {
 
         let paths = resolve_tool_paths(&cfg, "skills/plan/SKILL.md", TOOL_CURSOR);
         assert!(paths.is_empty());
+    }
+
+    #[test]
+    fn shared_skill_store_is_never_a_blacklist_deletion_target() {
+        let tmp = TempDir::new().expect("tmp");
+        let mut cfg = make_config(&tmp);
+        cfg.codex_skills_dir = cfg.central_skills_dir.clone();
+        cfg.opencode_skills_dir = cfg.central_skills_dir.clone();
+
+        assert!(resolve_tool_paths(&cfg, "skills/plan", TOOL_CODEX).is_empty());
+        assert!(resolve_tool_paths(&cfg, "skills/plan", TOOL_OPENCODE).is_empty());
     }
 
     #[test]

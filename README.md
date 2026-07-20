@@ -1,7 +1,8 @@
 # relay
 
 Minimal CLI to keep slash commands, skills, and agent/rule files aligned
-across tools while mirroring results into `~/.config/relay`.
+across tools. Skills use a shared user-owned store; Relay provides migration,
+compatibility adapters, reconciliation, history, and rollback around it.
 
 ## Defaults
 
@@ -11,14 +12,14 @@ Commands:
 - Claude commands: `$CLAUDE_HOME/commands` (default `~/.claude/commands`)
 - Cursor commands: `$CURSOR_HOME/commands` (default `~/.cursor/commands`)
 - OpenCode commands: `$OPENCODE_HOME/commands` (default `~/.config/opencode/commands`)
-- Codex command skill wrappers: `$CODEX_HOME/skills/<name>/SKILL.md`
+- Codex command skill wrappers: `~/.agents/skills/<name>/SKILL.md` by default
 
 Skills:
 
-- Central store: `~/.config/relay/skills`
-- Claude skills: `$CLAUDE_HOME/skills` (default `~/.claude/skills`)
-- OpenCode skills: `$OPENCODE_HOME/skills` (default `~/.config/opencode/skills`)
-- Codex skills: `$CODEX_HOME/skills` (default `~/.codex/skills`)
+- Canonical store: `~/.agents/skills`
+- Claude compatibility adapter: `$CLAUDE_HOME/skills` (default `~/.claude/skills`)
+- Codex and OpenCode: read the canonical store directly by default
+- Older Relay, Codex, and OpenCode directories: import-only migration sources
 
 Agents:
 
@@ -32,13 +33,14 @@ Rules:
 - Codex rules: `$CODEX_HOME/rules/default.rules` (default `~/.codex/rules/default.rules`)
 
 Commands are markdown files (e.g. `review.md`). For Codex, relay generates a skill
-wrapper at `$CODEX_HOME/skills/<name>/SKILL.md`, so Codex can discover the
+wrapper in the configured Codex skills directory (the shared store by default), so Codex can discover the
 workflow through skills. Relay does not sync old `$CODEX_HOME/prompts` command
 files. Generated command skill wrappers include a `.relay-command` marker and
 are ignored as skill sources. If a real skill and generated command wrapper
 share a Codex skill name, the real skill owns that directory and relay skips the
 wrapper. Skills are stored as directories named after the skill, with a
-`SKILL.md` inside (e.g. `review/SKILL.md`).
+`SKILL.md` inside (e.g. `review/SKILL.md`). Relay does not create redundant
+Codex or OpenCode copies when those clients use the shared store.
 Claude and OpenCode also read project commands from `.claude/commands/` and
 `.opencode/commands/`, plus project skills from `.claude/skills/<name>/SKILL.md`
 and `.opencode/skills/<name>/SKILL.md`; relay currently syncs global locations
@@ -49,11 +51,10 @@ only.
 - Relay follows `XDG_CONFIG_HOME` for config-style paths.
 - If `XDG_CONFIG_HOME` is not set, relay uses `$HOME/.config`.
 - `XDG_HOME` is not a standard XDG variable.
-- Existing configs that use OpenCode's former default `command` and `skill`
-  directories write to the current plural directories while continuing to read
-  and watch the legacy paths during migration. Custom paths are left unchanged.
-  After a successful sync, update those config values to `commands` and `skills`
-  to stop watching the legacy paths.
+- Existing configs that use OpenCode's former default `command` directory write
+  to `commands` while continuing to read and watch the legacy path during
+  migration. Custom paths are left unchanged. After a successful sync, update
+  that config value to `commands` to stop watching the legacy path.
 - In `config.toml` and path env vars, use concrete paths or supported forms:
   `~`, `$HOME`, `${HOME}`, `$XDG_CONFIG_HOME`, `${XDG_CONFIG_HOME}`, and
   `${XDG_CONFIG_HOME:-$HOME/.config}`.
@@ -89,7 +90,8 @@ relay [--debug] [--debug-log-file <path>] rollback [-l|--latest] [-f|--force]
 - Linux: `systemd --user` service
 
 `relay daemon` exposes explicit lifecycle control for that service.
-`relay status` is shorthand for `relay daemon status`.
+`relay status` is shorthand for `relay daemon status` and also prints skill
+store roles, paths, counts, tombstones, and import collisions.
 Init detects installed tool directories and lets you pick which ones to sync.
 Use Space to toggle selections and Enter to confirm.
 `relay sync --plan` previews changes without writing files.
@@ -113,6 +115,37 @@ available (example: `watch:codex:review.md`).
 - `relay rollback` restores the paths written by the chosen event (for example,
   mirrored targets from a watch sync), which may not include the original
   source file that triggered the sync.
+
+## Shared skill architecture
+
+`~/.agents/skills` is the canonical, user-owned skill directory. A skill in
+that directory wins over a same-named skill in an import-only legacy/native
+directory. Relay reports those collisions in verbose sync output and in
+`relay status`; it does not overwrite the canonical skill.
+
+Claude remains a read/write compatibility adapter. Relay mirrors canonical
+skills there, but an intentional Claude-side edit is reconciled back when the
+canonical copy has not changed. If both changed since the prior reconciliation,
+Relay reports a conflict and keeps the canonical version. Explicitly configured
+nonstandard Codex/OpenCode skill paths are also compatibility adapters; their
+standard legacy paths are import-only.
+
+Relay records canonical and adapter content hashes in
+`~/.config/relay/runtime/skills-state.toml`. When an observed canonical skill is
+deleted, Relay writes a tombstone and removes only adapter copies whose content
+still matches the last Relay-owned mirror. A modified adapter is preserved for
+manual resolution. Tombstones prevent stale legacy/native copies from
+resurrecting a deleted skill. Recreating the canonical skill clears its
+tombstone.
+
+On upgrade, an exact old default `central_skills_dir` of
+`~/.config/relay/skills` is interpreted as the legacy store and the effective
+canonical path becomes `~/.agents/skills`. Relay imports valid user-authored
+skills from the old Relay, Codex, and OpenCode locations when no canonical skill
+or tombstone owns the name. Hidden entries, generated command wrappers,
+symlinked skill roots, and directories carrying `.system`, `.plugin`,
+`.managed`, or `.relay-managed` markers are excluded from migration imports.
+Custom `central_skills_dir` values remain authoritative.
 
 ## Debugging
 
@@ -162,13 +195,13 @@ Setup and launchd scheduling guide: `docs/weekly-compat-pr.md`.
 
 ## Notes
 
-- Two-way sync is last-write-wins across tool directories; relay mirrors the
-  winning content into every synced location, including the central folder.
-- Edits made in `~/.config/relay` are treated the same as edits in tool
-  directories and will propagate on the next sync/watch cycle.
+- Commands retain two-way newest-wins synchronization across configured tool
+  directories and `~/.config/relay/commands`.
+- Skills use canonical-store reconciliation and compatibility adapters; they
+  are not blindly copied to every tool directory.
 - Skills are synced as directories, not single files, and must include `SKILL.md`.
 - Claude skills require frontmatter `name:` and `description:` in `SKILL.md`.
-- Codex skills are synced as directories with `SKILL.md` (same layout as Claude/OpenCode).
+- Shared-compatible clients consume canonical skill directories directly.
 - Codex command files are also mirrored as generated skill wrappers unless a
   real Codex skill already owns the same name.
 - AGENTS and rules are synced as files per tool into the central store.
@@ -181,8 +214,8 @@ Setup and launchd scheduling guide: `docs/weekly-compat-pr.md`.
   a warning.
 - Relay follows symlinks for command files and skill folders. Symlinks inside
   skill folders are ignored to avoid loops.
-- In actions mode, if two tools are edited within about 2 seconds and the
-  content differs, relay prints a warning and still uses last-write-wins.
+- Competing command/agent/rule edits still use newest-wins. Competing
+  canonical/adapter skill edits keep the canonical version.
 - Applied writes are recorded under `~/.config/relay/history` (events + blobs)
   for transparency and rollback.
 - If `~/.dotfiles` is detected during init, relay can optionally move existing
@@ -219,9 +252,10 @@ Each tool has its own subdirectories or files:
 Relay also keeps a central store in `~/.config/relay` with:
 
 - `commands/`
-- `skills/`
 - `agents/`
 - `rules/`
+
+Skills live separately in the standard `~/.agents/skills` store.
 
 ## Limitations
 
@@ -233,8 +267,15 @@ Relay also keeps a central store in `~/.config/relay` with:
 - Frontmatter compatibility is best-effort; relay does not rewrite or validate
   provider-specific frontmatter yet. A future `relay import`/`relay lint` will
   help normalize and validate per tool.
-- Cursor commands are synced; skills, agents, and rules are not supported
-  because Cursor only offers project-scoped rules and partial skills.
+- Per-tool skill blacklists cannot hide a canonical skill from a client that
+  reads `~/.agents/skills` directly. Relay never deletes the canonical copy to
+  implement such a blacklist.
+- Migration filtering cannot identify every third-party manager that writes a
+  plain, unmarked, non-symlinked skill into a native directory. Such managers
+  should add a supported marker or users should remove that import path from
+  their configuration.
+- Cursor commands are synced; Relay does not maintain a Cursor-specific skill
+  copy because shared-compatible clients can consume the canonical store.
 
 ## Verified Versions
 

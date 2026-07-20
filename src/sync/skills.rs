@@ -1,14 +1,15 @@
 use super::shared::{
-    collect_names, conflict_for_variants, file_mtime_value_from_meta, hash_bytes, list_if,
-    log_action, read_markdown, read_visible_entry, required_frontmatter_hash,
-    select_frontmatter_for_target, tool_order, write_file, TOOL_CENTRAL, TOOL_OPENCODE_LEGACY,
+    collect_names, conflict_for_variants, file_mtime_value_from_meta, hash_bytes, log_action,
+    read_markdown, read_visible_entry, required_frontmatter_hash, select_frontmatter_for_target,
+    tool_order, write_file, TOOL_CENTRAL,
 };
 use super::{ExecutionMode, LogMode as SyncLogMode, SyncConflict, SyncItemKind, SyncStats};
 use crate::config::{Config, TOOL_CLAUDE, TOOL_CODEX, TOOL_OPENCODE};
 use crate::history::HistoryRecorder;
 use crate::markers::is_relay_generated_command_skill;
+use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::env;
 use std::fs;
 use std::hash::{Hash, Hasher};
@@ -26,6 +27,191 @@ struct SkillVariant {
     tool: &'static str,
     path: PathBuf,
     digest: DirDigest,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct SkillState {
+    #[serde(default)]
+    skills: BTreeMap<String, SkillStateEntry>,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct SkillStateEntry {
+    canonical_hash: Option<i64>,
+    #[serde(default)]
+    tombstoned: bool,
+    #[serde(default)]
+    adapter_hashes: BTreeMap<String, i64>,
+}
+
+fn persisted_hash(hash: u64) -> i64 {
+    i64::from_ne_bytes(hash.to_ne_bytes())
+}
+
+struct SkillLocation {
+    label: &'static str,
+    path: PathBuf,
+    adapter: bool,
+    import_managed: bool,
+}
+
+pub(crate) fn diagnostics(cfg: &Config) -> io::Result<Vec<String>> {
+    let canonical = list_skills_if_exists(&cfg.central_skills_dir, true)?;
+    let state = load_skill_state(&cfg.skill_state_path()?)?;
+    let tombstones = state
+        .skills
+        .values()
+        .filter(|entry| entry.tombstoned)
+        .count();
+    let mut lines = vec![format!(
+        "skills: canonical={} count={} tombstones={}",
+        cfg.central_skills_dir.display(),
+        canonical.len(),
+        tombstones
+    )];
+    for location in skill_locations(cfg)? {
+        let role = if location.adapter {
+            "adapter"
+        } else {
+            "import"
+        };
+        let found = list_skills_if_exists(&location.path, location.import_managed)?;
+        let mut collisions = 0usize;
+        let mut owned = 0usize;
+        let mut divergent = 0usize;
+        if !location.adapter {
+            for (name, path) in &found {
+                if let Some(canonical_path) = canonical.get(name) {
+                    if digest_skill_dir(path)?.body_hash
+                        != digest_skill_dir(canonical_path)?.body_hash
+                    {
+                        collisions += 1;
+                    }
+                }
+            }
+        } else {
+            for (name, path) in &found {
+                if let Some(expected) = state
+                    .skills
+                    .get(name)
+                    .and_then(|entry| entry.adapter_hashes.get(location.label))
+                {
+                    owned += 1;
+                    if *expected != persisted_hash(digest_skill_dir(path)?.body_hash) {
+                        divergent += 1;
+                    }
+                }
+            }
+        }
+        lines.push(format!(
+            "skills: {} role={} path={} count={} owned={} divergent={} collisions={}",
+            location.label,
+            role,
+            location.path.display(),
+            found.len(),
+            owned,
+            divergent,
+            collisions
+        ));
+    }
+    Ok(lines)
+}
+
+fn skill_locations(cfg: &Config) -> io::Result<Vec<SkillLocation>> {
+    let mut out = Vec::new();
+    let mut push = |label: &'static str, path: PathBuf, adapter: bool, import_managed: bool| {
+        if path == cfg.central_skills_dir
+            || out.iter().any(|item: &SkillLocation| item.path == path)
+        {
+            return;
+        }
+        out.push(SkillLocation {
+            label,
+            path,
+            adapter,
+            import_managed,
+        });
+    };
+
+    if cfg.tool_enabled(TOOL_CLAUDE) {
+        push(TOOL_CLAUDE, cfg.claude_skills_dir.clone(), true, true);
+    }
+    for (label, enabled, path) in [
+        (
+            TOOL_CODEX,
+            cfg.tool_enabled(TOOL_CODEX),
+            &cfg.codex_skills_dir,
+        ),
+        (
+            TOOL_OPENCODE,
+            cfg.tool_enabled(TOOL_OPENCODE),
+            &cfg.opencode_skills_dir,
+        ),
+    ] {
+        if enabled {
+            let legacy_native = cfg.is_legacy_skill_import_dir(path)?;
+            push(label, path.clone(), !legacy_native, !legacy_native);
+        }
+    }
+    for path in cfg.legacy_skill_import_dirs()? {
+        push("migration", path, false, false);
+    }
+    Ok(out)
+}
+
+fn list_skills_if_exists(dir: &Path, import_managed: bool) -> io::Result<HashMap<String, PathBuf>> {
+    if !dir.exists() {
+        return Ok(HashMap::new());
+    }
+    list_skill_dirs_with_policy(dir, import_managed)
+}
+
+fn load_skill_state(path: &Path) -> io::Result<SkillState> {
+    if !path.exists() {
+        return Ok(SkillState::default());
+    }
+    let raw = fs::read_to_string(path)?;
+    toml::from_str(&raw).map_err(|err| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("invalid skill state in {}: {err}", path.display()),
+        )
+    })
+}
+
+fn save_skill_state(path: &Path, state: &SkillState) -> io::Result<()> {
+    path.parent().map(fs::create_dir_all).transpose()?;
+    let raw = toml::to_string_pretty(state)
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
+    crate::atomic::write_atomic(path, raw.as_bytes())
+}
+
+fn remove_skill_target(
+    path: &Path,
+    log_mode: SyncLogMode,
+    mode: ExecutionMode,
+    history: &mut Option<HistoryRecorder>,
+) -> io::Result<bool> {
+    if !path.exists() {
+        return Ok(false);
+    }
+    if mode == ExecutionMode::Plan {
+        log_action(
+            log_mode,
+            &format!("skills: would remove {}", path.display()),
+        );
+        return Ok(true);
+    }
+    let before = history
+        .as_ref()
+        .map(|recorder| recorder.capture_path(path))
+        .transpose()?;
+    fs::remove_dir_all(path)?;
+    if let (Some(recorder), Some(before)) = (history.as_mut(), before) {
+        recorder.record_change(path, before, crate::history::EntityState::missing());
+    }
+    log_action(log_mode, &format!("skills: removed {}", path.display()));
+    Ok(true)
 }
 
 impl super::shared::ConflictVariant for SkillVariant {
@@ -64,88 +250,245 @@ pub(crate) fn sync_skills_with_mode(
 ) -> io::Result<SyncStats> {
     let mut stats = SyncStats::default();
 
-    let claude_enabled = cfg.tool_enabled(TOOL_CLAUDE) && cfg.claude_skills_dir.exists();
-    let opencode_enabled = cfg.tool_enabled(TOOL_OPENCODE)
-        && cfg
-            .opencode_skills_dir
-            .parent()
-            .is_some_and(|parent| parent.exists());
-    let opencode_read_enabled = opencode_enabled && cfg.opencode_skills_dir.exists();
-    let codex_enabled = codex_skills_target_enabled(cfg);
-    let codex_read_enabled = cfg.tool_enabled(TOOL_CODEX) && cfg.codex_skills_dir.exists();
+    let state_path = cfg.skill_state_path()?;
+    let mut state = load_skill_state(&state_path)?;
+    let central = list_skills_if_exists(&cfg.central_skills_dir, true)?;
+    let locations = skill_locations(cfg)?;
+    let mut location_maps = Vec::new();
+    for location in &locations {
+        location_maps.push(list_skills_if_exists(
+            &location.path,
+            location.import_managed,
+        )?);
+    }
 
-    let claude = list_if(claude_enabled, &cfg.claude_skills_dir, list_skill_dirs)?;
-    let opencode = list_if(
-        opencode_read_enabled,
-        &cfg.opencode_skills_dir,
-        list_skill_dirs,
-    )?;
-    let legacy_opencode = match cfg.opencode_legacy_skills_dir.as_deref() {
-        Some(dir) if cfg.tool_enabled(TOOL_OPENCODE) && dir.exists() => list_skill_dirs(dir)?,
-        _ => HashMap::new(),
-    };
-    let codex = list_if(codex_read_enabled, &cfg.codex_skills_dir, list_skill_dirs)?;
-    let central = if cfg.central_skills_dir.exists() {
-        list_skill_dirs(&cfg.central_skills_dir)?
-    } else {
-        HashMap::new()
-    };
+    let mut names = collect_names(&[&central]);
+    for map in &location_maps {
+        names.extend(map.keys().cloned());
+    }
+    names.extend(state.skills.keys().cloned());
 
-    let names = collect_names(&[&claude, &opencode, &legacy_opencode, &codex, &central]);
     for name in names {
-        let mut variants: Vec<SkillVariant> = Vec::new();
-        for (tool, map) in [
-            (TOOL_CENTRAL, &central),
-            (TOOL_CLAUDE, &claude),
-            (TOOL_OPENCODE, &opencode),
-            (TOOL_OPENCODE_LEGACY, &legacy_opencode),
-            (TOOL_CODEX, &codex),
-        ] {
-            if let Some(path) = map.get(&name) {
-                variants.push(SkillVariant {
-                    tool,
+        let central_path = cfg.central_skills_dir.join(&name);
+        let canonical = central
+            .get(&name)
+            .map(|path| {
+                Ok::<_, io::Error>(SkillVariant {
+                    tool: TOOL_CENTRAL,
                     path: path.clone(),
                     digest: digest_skill_dir(path)?,
-                });
+                })
+            })
+            .transpose()?;
+        let entry = state.skills.entry(name.clone()).or_default();
+
+        // Recreating a tombstoned canonical skill is an explicit restore. Drop
+        // stale adapter ownership before reconciliation so a preserved adapter
+        // cannot overwrite the newly restored canonical contents.
+        if entry.tombstoned {
+            if let Some(canonical) = canonical.as_ref() {
+                entry.tombstoned = false;
+                entry.canonical_hash = Some(persisted_hash(canonical.digest.body_hash));
+                entry.adapter_hashes.clear();
             }
         }
-        let winner = select_skill_winner(&variants);
-        if let Some(conflict) = conflict_for_variants(
-            &name,
-            SyncItemKind::Skill,
-            &variants,
-            winner.tool,
-            winner.digest.body_hash,
-        ) {
-            conflicts.push(conflict);
+
+        // A previously observed canonical skill disappearing is an explicit
+        // deletion. Keep a tombstone so stale native copies cannot resurrect it.
+        if canonical.is_none() && entry.canonical_hash.is_some() {
+            entry.canonical_hash = None;
+            entry.tombstoned = true;
+            for (location, map) in locations.iter().zip(&location_maps) {
+                if !location.adapter {
+                    continue;
+                }
+                let Some(path) = map.get(&name) else { continue };
+                let digest = digest_skill_dir(path)?;
+                let owned = entry
+                    .adapter_hashes
+                    .get(location.label)
+                    .is_some_and(|hash| *hash == persisted_hash(digest.body_hash));
+                if owned {
+                    stats.updated +=
+                        usize::from(remove_skill_target(path, log_mode, mode, history)?);
+                    entry.adapter_hashes.remove(location.label);
+                } else {
+                    log_action(log_mode, &format!(
+                        "warning: skills '{name}' deleted centrally but modified adapter {} was preserved",
+                        location.label
+                    ));
+                }
+            }
+            continue;
+        }
+
+        let mut canonical = canonical;
+        let mut sources = Vec::new();
+        for (location, map) in locations.iter().zip(&location_maps) {
+            let Some(path) = map.get(&name) else { continue };
+            sources.push(SkillVariant {
+                tool: location.label,
+                path: path.clone(),
+                digest: digest_skill_dir(path)?,
+            });
+        }
+
+        // A compatibility adapter can be an authoring location. Accept its
+        // edit only when the canonical copy has not also changed since the last
+        // reconciliation; simultaneous edits are reported and canonical wins.
+        if let Some(current) = canonical.as_ref() {
+            let current_digest = current.digest;
+            let canonical_changed = entry
+                .canonical_hash
+                .is_some_and(|hash| hash != persisted_hash(current_digest.body_hash));
+            let changed_adapters: Vec<&SkillVariant> = sources
+                .iter()
+                .filter(|source| {
+                    locations
+                        .iter()
+                        .any(|location| location.label == source.tool && location.adapter)
+                        && entry
+                            .adapter_hashes
+                            .get(source.tool)
+                            .is_some_and(|hash| *hash != persisted_hash(source.digest.body_hash))
+                })
+                .collect();
+            if canonical_changed {
+                for source in changed_adapters
+                    .iter()
+                    .filter(|source| source.digest.body_hash != current_digest.body_hash)
+                {
+                    conflicts.push(SyncConflict {
+                        kind: SyncItemKind::Skill,
+                        name: name.clone(),
+                        winner: TOOL_CENTRAL,
+                        others: vec![source.tool],
+                    });
+                    log_action(log_mode, &format!(
+                        "warning: skills '{name}' changed in canonical store and {}; canonical store won",
+                        source.tool
+                    ));
+                }
+            } else if let Some(winner) = changed_adapters
+                .iter()
+                .max_by_key(|source| (source.digest.mtime, tool_order(source.tool)))
+            {
+                let others: Vec<&'static str> = changed_adapters
+                    .iter()
+                    .filter(|source| {
+                        source.tool != winner.tool
+                            && source.digest.body_hash != winner.digest.body_hash
+                    })
+                    .map(|source| source.tool)
+                    .collect();
+                if !others.is_empty() {
+                    conflicts.push(SyncConflict {
+                        kind: SyncItemKind::Skill,
+                        name: name.clone(),
+                        winner: winner.tool,
+                        others,
+                    });
+                    log_action(
+                        log_mode,
+                        &format!(
+                            "warning: skills '{name}' changed in multiple adapters; newest adapter {} won",
+                            winner.tool
+                        ),
+                    );
+                }
+                stats.updated += usize::from(sync_skill_target(
+                    &winner.path,
+                    winner.digest,
+                    Some(current_digest),
+                    &central_path,
+                    log_mode,
+                    mode,
+                    history,
+                )?);
+                canonical = Some(SkillVariant {
+                    tool: TOOL_CENTRAL,
+                    path: central_path.clone(),
+                    digest: winner.digest,
+                });
+            }
+            for source in sources.iter().filter(|source| {
+                locations
+                    .iter()
+                    .any(|location| location.label == source.tool && !location.adapter)
+            }) {
+                if source.digest.body_hash != current_digest.body_hash {
+                    log_action(log_mode, &format!(
+                        "warning: skills '{name}' in import-only {} collides with canonical store; canonical store won",
+                        source.tool
+                    ));
+                }
+            }
+        }
+
+        if canonical.is_none() && !entry.tombstoned && !sources.is_empty() {
+            let winner = select_skill_winner(&sources);
+            if let Some(conflict) = conflict_for_variants(
+                &name,
+                SyncItemKind::Skill,
+                &sources,
+                winner.tool,
+                winner.digest.body_hash,
+            ) {
+                conflicts.push(conflict);
+            }
+            stats.updated += usize::from(sync_skill_target(
+                &winner.path,
+                winner.digest,
+                None,
+                &central_path,
+                log_mode,
+                mode,
+                history,
+            )?);
+            canonical = Some(SkillVariant {
+                tool: TOOL_CENTRAL,
+                path: central_path.clone(),
+                digest: winner.digest,
+            });
             log_action(
                 log_mode,
                 &format!(
-                    "warning: skills '{name}' edited in multiple tools; last-write-wins chose {}",
+                    "skills: imported '{name}' from {} into canonical store",
                     winner.tool
                 ),
             );
         }
 
-        for (tool, enabled, base_dir) in [
-            (TOOL_CENTRAL, true, &cfg.central_skills_dir),
-            (TOOL_CLAUDE, claude_enabled, &cfg.claude_skills_dir),
-            (TOOL_OPENCODE, opencode_enabled, &cfg.opencode_skills_dir),
-            (TOOL_CODEX, codex_enabled, &cfg.codex_skills_dir),
-        ] {
-            if !enabled {
+        let Some(canonical) = canonical else { continue };
+        entry.tombstoned = false;
+        entry.canonical_hash = Some(persisted_hash(canonical.digest.body_hash));
+        for (location, map) in locations.iter().zip(&location_maps) {
+            if !location.adapter || cfg.is_blacklisted(&format!("skills/{name}"), location.label) {
                 continue;
             }
-            if tool != TOOL_CENTRAL && cfg.is_blacklisted(&format!("skills/{name}"), tool) {
-                continue;
-            }
-            let updated = sync_skill_for_tool(
-                tool, base_dir, &name, winner, &variants, log_mode, mode, history,
-            )?;
-            stats.updated += usize::from(updated);
+            let existing = map
+                .get(&name)
+                .map(|path| digest_skill_dir(path))
+                .transpose()?;
+            stats.updated += usize::from(sync_skill_target(
+                &canonical.path,
+                canonical.digest,
+                existing,
+                &location.path.join(&name),
+                log_mode,
+                mode,
+                history,
+            )?);
+            entry.adapter_hashes.insert(
+                location.label.to_string(),
+                persisted_hash(canonical.digest.body_hash),
+            );
         }
     }
 
+    if mode == ExecutionMode::Apply {
+        save_skill_state(&state_path, &state)?;
+    }
     Ok(stats)
 }
 
@@ -155,40 +498,10 @@ pub(super) fn codex_real_skill_names(cfg: &Config) -> io::Result<HashSet<String>
         return Ok(names);
     }
 
-    if cfg.codex_skills_dir.exists() {
-        names.extend(list_skill_dirs(&cfg.codex_skills_dir)?.into_keys());
-    }
-
-    for (enabled, dir) in [
-        (cfg.central_skills_dir.exists(), &cfg.central_skills_dir),
-        (
-            cfg.tool_enabled(TOOL_CLAUDE) && cfg.claude_skills_dir.exists(),
-            &cfg.claude_skills_dir,
-        ),
-        (
-            cfg.tool_enabled(TOOL_OPENCODE) && cfg.opencode_skills_dir.exists(),
-            &cfg.opencode_skills_dir,
-        ),
-    ] {
-        if !enabled {
-            continue;
-        }
-        for name in list_skill_dirs(dir)?.into_keys() {
+    if cfg.central_skills_dir.exists() {
+        for name in list_skill_dirs(&cfg.central_skills_dir)?.into_keys() {
             if !cfg.is_blacklisted(&format!("skills/{name}"), TOOL_CODEX) {
                 names.insert(name);
-            }
-        }
-    }
-    if cfg.tool_enabled(TOOL_OPENCODE) {
-        if let Some(dir) = cfg
-            .opencode_legacy_skills_dir
-            .as_deref()
-            .filter(|dir| dir.exists())
-        {
-            for name in list_skill_dirs(dir)?.into_keys() {
-                if !cfg.is_blacklisted(&format!("skills/{name}"), TOOL_CODEX) {
-                    names.insert(name);
-                }
             }
         }
     }
@@ -198,37 +511,11 @@ pub(super) fn codex_real_skill_names(cfg: &Config) -> io::Result<HashSet<String>
 
 pub(super) fn codex_skills_target_enabled(cfg: &Config) -> bool {
     cfg.tool_enabled(TOOL_CODEX)
-        && cfg
-            .codex_skills_dir
-            .parent()
-            .is_some_and(|parent| parent.exists())
-}
-
-#[allow(clippy::too_many_arguments)]
-fn sync_skill_for_tool(
-    tool: &'static str,
-    base_dir: &Path,
-    name: &str,
-    winner: &SkillVariant,
-    variants: &[SkillVariant],
-    log_mode: SyncLogMode,
-    mode: ExecutionMode,
-    history: &mut Option<HistoryRecorder>,
-) -> io::Result<bool> {
-    let target_path = base_dir.join(name);
-    let existing = variants
-        .iter()
-        .find(|variant| variant.tool == tool && variant.path == target_path)
-        .map(|variant| variant.digest);
-    sync_skill_target(
-        &winner.path,
-        winner.digest,
-        existing,
-        &target_path,
-        log_mode,
-        mode,
-        history,
-    )
+        && (cfg.codex_skills_dir == cfg.central_skills_dir
+            || cfg
+                .codex_skills_dir
+                .parent()
+                .is_some_and(|parent| parent.exists()))
 }
 
 fn select_skill_winner(variants: &[SkillVariant]) -> &SkillVariant {
@@ -324,19 +611,36 @@ fn merge_skill_frontmatter(
 }
 
 fn list_skill_dirs(dir: &Path) -> io::Result<HashMap<String, PathBuf>> {
+    list_skill_dirs_with_policy(dir, true)
+}
+
+fn list_skill_dirs_with_policy(
+    dir: &Path,
+    import_managed: bool,
+) -> io::Result<HashMap<String, PathBuf>> {
     let mut out = HashMap::new();
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
+        if !import_managed && entry.file_type()?.is_symlink() {
+            continue;
+        }
         if let Some((name, path, meta)) = read_visible_entry(entry, true)? {
             if meta.is_dir()
                 && path.join("SKILL.md").exists()
                 && !is_relay_generated_command_skill(&path)
+                && (import_managed || !looks_plugin_managed(&path))
             {
                 out.insert(name, path);
             }
         }
     }
     Ok(out)
+}
+
+fn looks_plugin_managed(path: &Path) -> bool {
+    [".system", ".plugin", ".managed", ".relay-managed"]
+        .iter()
+        .any(|marker| path.join(marker).exists())
 }
 
 fn digest_skill_dir(dir: &Path) -> io::Result<DirDigest> {
@@ -551,78 +855,6 @@ mod tests {
     }
 
     #[test]
-    fn sync_skills_creates_missing_opencode_skills_dir() -> io::Result<()> {
-        let (_tmp, cfg) = setup()?;
-        fs::remove_dir_all(&cfg.opencode_skills_dir)?;
-        write_skill(&cfg.central_skills_dir, "plan", &doc("central", "Body"))?;
-
-        sync_skills(&cfg, SyncLogMode::Quiet)?;
-
-        assert_eq!(
-            read_markdown(&cfg.opencode_skills_dir.join("plan/SKILL.md"))?.body,
-            "Body"
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn sync_skills_imports_legacy_only_skill() -> io::Result<()> {
-        let (_tmp, mut cfg) = setup()?;
-        let legacy_dir = cfg.opencode_skills_dir.with_file_name("skill");
-        cfg.opencode_legacy_skills_dir = Some(legacy_dir.clone());
-        write_skill(&legacy_dir, "plan", &doc("legacy", "Legacy body"))?;
-
-        assert!(codex_real_skill_names(&cfg)?.contains("plan"));
-        sync_skills(&cfg, SyncLogMode::Quiet)?;
-
-        assert_eq!(
-            read_markdown(&cfg.opencode_skills_dir.join("plan/SKILL.md"))?.body,
-            "Legacy body"
-        );
-        assert_eq!(
-            read_markdown(&cfg.central_skills_dir.join("plan/SKILL.md"))?.body,
-            "Legacy body"
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn sync_skills_reports_conflict_between_plural_and_legacy_paths() -> io::Result<()> {
-        let (_tmp, mut cfg) = setup()?;
-        let legacy_dir = cfg.opencode_skills_dir.with_file_name("skill");
-        cfg.opencode_legacy_skills_dir = Some(legacy_dir.clone());
-        let plural = write_skill(
-            &cfg.opencode_skills_dir,
-            "plan",
-            &doc("plural", "Plural body"),
-        )?;
-        let legacy = write_skill(&legacy_dir, "plan", &doc("legacy", "Legacy body"))?;
-        crate::sync::test_support::set_mtime(&plural.join("SKILL.md"), 100)?;
-        crate::sync::test_support::set_mtime(&legacy.join("SKILL.md"), 101)?;
-
-        let mut history = None;
-        let mut conflicts = Vec::new();
-        sync_skills_with_mode(
-            &cfg,
-            SyncLogMode::Quiet,
-            ExecutionMode::Plan,
-            &mut history,
-            &mut conflicts,
-        )?;
-
-        assert_eq!(
-            conflicts,
-            vec![SyncConflict {
-                kind: SyncItemKind::Skill,
-                name: "plan".to_string(),
-                winner: TOOL_OPENCODE_LEGACY,
-                others: vec![TOOL_OPENCODE],
-            }]
-        );
-        Ok(())
-    }
-
-    #[test]
     fn sync_skills_blacklist_skips_tool_but_syncs_others() -> io::Result<()> {
         let (_tmp, mut cfg) = setup()?;
 
@@ -656,12 +888,201 @@ mod tests {
     }
 
     #[test]
-    fn sync_skills_skips_missing_tool_dir() -> io::Result<()> {
+    fn sync_skills_creates_missing_custom_adapter_dir() -> io::Result<()> {
         let (_tmp, cfg) = setup()?;
-        fs::remove_dir_all(cfg.opencode_skills_dir.parent().unwrap())?;
+        fs::remove_dir_all(&cfg.opencode_skills_dir)?;
         write_skill(&cfg.claude_skills_dir, "plan", &doc("claude", "Body"))?;
         sync_skills(&cfg, SyncLogMode::Quiet)?;
-        assert!(!cfg.opencode_skills_dir.exists());
+        assert!(cfg.opencode_skills_dir.join("plan/SKILL.md").exists());
+        Ok(())
+    }
+
+    #[test]
+    fn canonical_deletion_tombstones_and_removes_owned_adapters() -> io::Result<()> {
+        let (_tmp, cfg) = setup()?;
+        let central = write_skill(&cfg.central_skills_dir, "plan", &doc("plan", "Body"))?;
+        sync_skills(&cfg, SyncLogMode::Quiet)?;
+        assert!(cfg.claude_skills_dir.join("plan/SKILL.md").exists());
+
+        fs::remove_dir_all(central)?;
+        sync_skills(&cfg, SyncLogMode::Quiet)?;
+        assert!(!cfg.claude_skills_dir.join("plan").exists());
+        assert!(!cfg.codex_skills_dir.join("plan").exists());
+        assert!(!cfg.opencode_skills_dir.join("plan").exists());
+
+        sync_skills(&cfg, SyncLogMode::Quiet)?;
+        assert!(!cfg.central_skills_dir.join("plan").exists());
+        let state = load_skill_state(&cfg.skill_state_path()?)?;
+        assert!(state.skills["plan"].tombstoned);
+        Ok(())
+    }
+
+    #[test]
+    fn canonical_deletion_preserves_modified_adapter() -> io::Result<()> {
+        let (_tmp, cfg) = setup()?;
+        let central = write_skill(&cfg.central_skills_dir, "plan", &doc("plan", "Body"))?;
+        sync_skills(&cfg, SyncLogMode::Quiet)?;
+        write_plain(
+            &cfg.claude_skills_dir.join("plan/SKILL.md"),
+            &doc("plan", "Locally changed"),
+        )?;
+        fs::remove_dir_all(central)?;
+
+        sync_skills(&cfg, SyncLogMode::Quiet)?;
+
+        assert!(cfg.claude_skills_dir.join("plan/SKILL.md").exists());
+        assert!(!cfg.central_skills_dir.join("plan").exists());
+        Ok(())
+    }
+
+    #[test]
+    fn recreated_canonical_skill_wins_over_preserved_adapter() -> io::Result<()> {
+        let (_tmp, cfg) = setup()?;
+        let central = write_skill(&cfg.central_skills_dir, "plan", &doc("plan", "Original"))?;
+        sync_skills(&cfg, SyncLogMode::Quiet)?;
+        write_plain(
+            &cfg.claude_skills_dir.join("plan/SKILL.md"),
+            &doc("plan", "Preserved adapter edit"),
+        )?;
+        fs::remove_dir_all(central)?;
+        sync_skills(&cfg, SyncLogMode::Quiet)?;
+        assert!(cfg.claude_skills_dir.join("plan/SKILL.md").exists());
+
+        write_skill(
+            &cfg.central_skills_dir,
+            "plan",
+            &doc("plan", "Restored canonical"),
+        )?;
+        sync_skills(&cfg, SyncLogMode::Quiet)?;
+
+        assert_eq!(
+            read_markdown(&cfg.central_skills_dir.join("plan/SKILL.md"))?.body,
+            "Restored canonical"
+        );
+        assert_eq!(
+            read_markdown(&cfg.claude_skills_dir.join("plan/SKILL.md"))?.body,
+            "Restored canonical"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn adapter_edit_updates_unchanged_canonical_skill() -> io::Result<()> {
+        let (_tmp, cfg) = setup()?;
+        write_skill(&cfg.central_skills_dir, "plan", &doc("plan", "Old"))?;
+        sync_skills(&cfg, SyncLogMode::Quiet)?;
+        write_plain(
+            &cfg.claude_skills_dir.join("plan/SKILL.md"),
+            &doc("plan", "New"),
+        )?;
+
+        sync_skills(&cfg, SyncLogMode::Quiet)?;
+
+        assert_eq!(
+            read_markdown(&cfg.central_skills_dir.join("plan/SKILL.md"))?.body,
+            "New"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn competing_adapter_edits_report_conflict_and_choose_newest() -> io::Result<()> {
+        let (_tmp, cfg) = setup()?;
+        write_skill(&cfg.central_skills_dir, "plan", &doc("plan", "Old"))?;
+        sync_skills(&cfg, SyncLogMode::Quiet)?;
+        let claude = cfg.claude_skills_dir.join("plan/SKILL.md");
+        let codex = cfg.codex_skills_dir.join("plan/SKILL.md");
+        write_plain(&claude, &doc("plan", "Claude edit"))?;
+        write_plain(&codex, &doc("plan", "Codex edit"))?;
+        crate::sync::test_support::set_mtime(&claude, 101)?;
+        crate::sync::test_support::set_mtime(&codex, 102)?;
+        let mut history = None;
+        let mut conflicts = Vec::new();
+
+        sync_skills_with_mode(
+            &cfg,
+            SyncLogMode::Quiet,
+            ExecutionMode::Apply,
+            &mut history,
+            &mut conflicts,
+        )?;
+
+        assert_eq!(
+            read_markdown(&cfg.central_skills_dir.join("plan/SKILL.md"))?.body,
+            "Codex edit"
+        );
+        assert!(conflicts.contains(&SyncConflict {
+            kind: SyncItemKind::Skill,
+            name: "plan".to_string(),
+            winner: TOOL_CODEX,
+            others: vec![TOOL_CLAUDE],
+        }));
+        Ok(())
+    }
+
+    #[test]
+    fn import_policy_skips_symlinked_and_managed_skills() -> io::Result<()> {
+        let tmp = TempDir::new()?;
+        let source = tmp.path().join("native");
+        fs::create_dir_all(&source)?;
+        write_skill(&source, "owned", &doc("owned", "Owned"))?;
+        let managed = write_skill(&source, "managed", &doc("managed", "Managed"))?;
+        write_plain(&managed.join(".plugin"), "managed")?;
+        #[cfg(unix)]
+        {
+            let real = write_skill(tmp.path(), "real", &doc("real", "Real"))?;
+            std::os::unix::fs::symlink(real, source.join("linked"))?;
+        }
+
+        let found = list_skill_dirs_with_policy(&source, false)?;
+        assert!(found.contains_key("owned"));
+        assert!(!found.contains_key("managed"));
+        assert!(!found.contains_key("linked"));
+        Ok(())
+    }
+
+    #[test]
+    fn diagnostics_reports_roles_and_tombstones() -> io::Result<()> {
+        let (_tmp, cfg) = setup()?;
+        write_skill(&cfg.central_skills_dir, "plan", &doc("plan", "Body"))?;
+        sync_skills(&cfg, SyncLogMode::Quiet)?;
+        let lines = diagnostics(&cfg)?;
+        assert!(lines[0].contains("count=1"));
+        assert!(lines
+            .iter()
+            .any(|line| line.contains("claude role=adapter")));
+        Ok(())
+    }
+
+    #[test]
+    fn default_migration_imports_user_skills_without_redundant_native_copies() -> io::Result<()> {
+        let _lock = crate::ENV_LOCK.lock().unwrap();
+        let tmp = TempDir::new()?;
+        let home = tmp.path().join("home");
+        fs::create_dir_all(&home)?;
+        std::env::set_var("RELAY_HOME", &home);
+        std::env::remove_var("CODEX_HOME");
+        std::env::remove_var("CLAUDE_HOME");
+        std::env::remove_var("OPENCODE_HOME");
+        let cfg = Config::default_paths()?;
+        let legacy_relay = home.join(".config/relay/skills");
+        let legacy_codex = home.join(".codex/skills");
+        write_skill(&legacy_relay, "from-relay", &doc("from-relay", "Relay"))?;
+        write_skill(&legacy_codex, "from-native", &doc("from-native", "Native"))?;
+        let managed = write_skill(&legacy_codex, "plugin", &doc("plugin", "Plugin"))?;
+        write_plain(&managed.join(".plugin"), "managed")?;
+        fs::create_dir_all(&cfg.claude_skills_dir)?;
+
+        sync_skills(&cfg, SyncLogMode::Quiet)?;
+
+        assert!(cfg.central_skills_dir.join("from-relay/SKILL.md").exists());
+        assert!(cfg.central_skills_dir.join("from-native/SKILL.md").exists());
+        assert!(!cfg.central_skills_dir.join("plugin").exists());
+        assert!(cfg.claude_skills_dir.join("from-relay/SKILL.md").exists());
+        assert!(!legacy_codex.join("from-relay").exists());
+        assert!(!home.join(".config/opencode/skill/from-relay").exists());
+
+        std::env::remove_var("RELAY_HOME");
         Ok(())
     }
 

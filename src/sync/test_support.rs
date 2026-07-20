@@ -27,7 +27,6 @@ pub(crate) fn make_config(tmp: &TempDir) -> Config {
         opencode_commands_dir: tmp.path().join("opencode/commands"),
         opencode_legacy_commands_dir: None,
         opencode_skills_dir: tmp.path().join("opencode/skills"),
-        opencode_legacy_skills_dir: None,
         opencode_agents_file: tmp.path().join("opencode_agents/AGENTS.md"),
         codex_skills_dir: tmp.path().join("codex_skills"),
         codex_rules_file: tmp.path().join("codex_rules/default.rules"),

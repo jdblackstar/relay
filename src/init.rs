@@ -20,7 +20,7 @@ pub(crate) fn init() -> io::Result<()> {
     let enabled_tools = select_tools(&defaults)?;
     let central_root = prompt_central_root(&defaults)?;
     let central_dir = central_root.join("commands");
-    let central_skills_dir = central_root.join("skills");
+    let central_skills_dir = defaults.central_skills_dir.clone();
     let central_agents_dir = central_root.join("agents");
     let central_rules_dir = central_root.join("rules");
     let prompt_tool_base = |tool: &str, label: &str, path: &Path| {
@@ -36,7 +36,7 @@ pub(crate) fn init() -> io::Result<()> {
     let codex_base = prompt_tool_base(
         TOOL_CODEX,
         "Codex base directory",
-        &defaults.codex_skills_dir,
+        &defaults.codex_agents_file,
     )?;
     let opencode_base = prompt_tool_base(
         TOOL_OPENCODE,
@@ -51,8 +51,7 @@ pub(crate) fn init() -> io::Result<()> {
         "skills",
     );
     let cursor_dir = derive_from_base(cursor_base.as_deref(), &defaults.cursor_dir, "commands");
-    let codex_skills_dir =
-        derive_from_base(codex_base.as_deref(), &defaults.codex_skills_dir, "skills");
+    let codex_skills_dir = defaults.codex_skills_dir.clone();
     let codex_rules_file = derive_from_base(
         codex_base.as_deref(),
         &defaults.codex_rules_file,
@@ -68,11 +67,7 @@ pub(crate) fn init() -> io::Result<()> {
         &defaults.opencode_commands_dir,
         "commands",
     );
-    let os_dir = derive_from_base(
-        opencode_base.as_deref(),
-        &defaults.opencode_skills_dir,
-        "skills",
-    );
+    let os_dir = defaults.opencode_skills_dir.clone();
     let oa_file = derive_from_base(
         opencode_base.as_deref(),
         &defaults.opencode_agents_file,
@@ -93,7 +88,6 @@ pub(crate) fn init() -> io::Result<()> {
         opencode_commands_dir: oc_dir,
         opencode_legacy_commands_dir: None,
         opencode_skills_dir: os_dir,
-        opencode_legacy_skills_dir: None,
         opencode_agents_file: oa_file,
         codex_skills_dir,
         codex_rules_file,
@@ -302,13 +296,9 @@ fn maybe_setup_dotfiles_backup(cfg: &Config) -> io::Result<()> {
 
 fn central_root(cfg: &Config) -> Option<PathBuf> {
     let commands_parent = cfg.central_dir.parent()?;
-    let skills_parent = cfg.central_skills_dir.parent()?;
     let agents_parent = cfg.central_agents_dir.parent()?;
     let rules_parent = cfg.central_rules_dir.parent()?;
-    if commands_parent == skills_parent
-        && commands_parent == agents_parent
-        && commands_parent == rules_parent
-    {
+    if commands_parent == agents_parent && commands_parent == rules_parent {
         Some(commands_parent.to_path_buf())
     } else {
         None
@@ -511,7 +501,6 @@ mod tests {
             opencode_commands_dir: tmp.path().join("opencode/commands"),
             opencode_legacy_commands_dir: None,
             opencode_skills_dir: tmp.path().join("opencode/skills"),
-            opencode_legacy_skills_dir: None,
             opencode_agents_file: tmp.path().join("opencode/AGENTS.md"),
             codex_skills_dir: tmp.path().join("codex/skills"),
             codex_rules_file: tmp.path().join("codex/rules/default.rules"),
@@ -710,7 +699,7 @@ mod tests {
     }
 
     #[test]
-    fn dotfiles_backup_skips_when_central_root_missing() -> io::Result<()> {
+    fn dotfiles_backup_allows_separate_shared_skill_store() -> io::Result<()> {
         let _lock = env_lock();
         let tmp = TempDir::new()?;
         let home = tmp.path().join("home");
@@ -718,10 +707,15 @@ mod tests {
         set_env("RELAY_HOME", Some(home.to_string_lossy().as_ref()));
         let mut cfg = make_config(&tmp);
         cfg.central_dir = home.join(".config/relay/commands");
-        cfg.central_skills_dir = home.join(".config/relay/other/skills");
+        cfg.central_skills_dir = home.join(".agents/skills");
         cfg.central_agents_dir = home.join(".config/relay/agents");
         cfg.central_rules_dir = home.join(".config/relay/rules");
+        set_env("RELAY_TEST_CONFIRM", Some("1"));
         maybe_setup_dotfiles_backup(&cfg)?;
+        assert!(fs::symlink_metadata(home.join(".config/relay"))?
+            .file_type()
+            .is_symlink());
+        set_env("RELAY_TEST_CONFIRM", None);
         set_env("RELAY_HOME", None);
         Ok(())
     }

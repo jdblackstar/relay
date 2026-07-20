@@ -15,6 +15,7 @@ mkdir -p \
   "${HOME_DIR}/.config/relay/skills" \
   "${HOME_DIR}/.config/relay/agents" \
   "${HOME_DIR}/.config/relay/rules" \
+  "${HOME_DIR}/.agents/skills" \
   "${HOME_DIR}/.claude/commands" \
   "${HOME_DIR}/.claude/skills" \
   "${HOME_DIR}/.codex/skills" \
@@ -50,16 +51,16 @@ enabled_tools = ["claude", "codex", "cursor", "opencode"]
 verified_versions = {}
 blacklist = {}
 central_dir = "${HOME_DIR}/.config/relay/commands"
-central_skills_dir = "${HOME_DIR}/.config/relay/skills"
+central_skills_dir = "${HOME_DIR}/.agents/skills"
 central_agents_dir = "${HOME_DIR}/.config/relay/agents"
 central_rules_dir = "${HOME_DIR}/.config/relay/rules"
 claude_dir = "${HOME_DIR}/.claude/commands"
 claude_skills_dir = "${HOME_DIR}/.claude/skills"
 cursor_dir = "${HOME_DIR}/.cursor/commands"
 opencode_commands_dir = "${HOME_DIR}/.config/opencode/commands"
-opencode_skills_dir = "${HOME_DIR}/.config/opencode/skills"
+opencode_skills_dir = "${HOME_DIR}/.agents/skills"
 opencode_agents_file = "${HOME_DIR}/.config/opencode/AGENTS.md"
-codex_skills_dir = "${HOME_DIR}/.codex/skills"
+codex_skills_dir = "${HOME_DIR}/.agents/skills"
 codex_rules_file = "${HOME_DIR}/.codex/rules/default.rules"
 codex_agents_file = "${HOME_DIR}/.codex/AGENTS.md"
 EOF
