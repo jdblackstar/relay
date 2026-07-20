@@ -93,7 +93,10 @@ fn tool_paths<'a>(cfg: &'a Config, tool: &str) -> Option<Vec<&'a PathBuf>> {
         paths.push(getter(cfg));
     }
     if let Some(getter) = definition.skills_dir {
-        paths.push(getter(cfg));
+        let path = getter(cfg);
+        if path != &cfg.central_skills_dir {
+            paths.push(path);
+        }
     }
     if let Some(getter) = definition.agents_file {
         paths.push(getter(cfg));

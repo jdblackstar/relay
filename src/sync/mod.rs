@@ -86,6 +86,10 @@ pub(crate) fn sync_all(cfg: &Config, log_mode: LogMode) -> io::Result<SyncReport
     Ok(sync_all_with_mode(cfg, log_mode, ExecutionMode::Apply, "sync")?.report)
 }
 
+pub(crate) fn skill_diagnostics(cfg: &Config) -> io::Result<Vec<String>> {
+    skills::diagnostics(cfg)
+}
+
 pub(crate) fn sync_all_with_mode(
     cfg: &Config,
     log_mode: LogMode,
@@ -149,6 +153,14 @@ mod tests {
         let recent = store.list_recent(5)?;
         assert_eq!(recent.len(), 1);
         assert!(fs::read_to_string(cfg.central_dir.join("demo.md"))?.contains("hello"));
+        Ok(())
+    }
+
+    #[test]
+    fn skill_diagnostics_are_available_for_status() -> io::Result<()> {
+        let (_tmp, cfg) = setup()?;
+        let lines = skill_diagnostics(&cfg)?;
+        assert!(lines[0].starts_with("skills: canonical="));
         Ok(())
     }
 

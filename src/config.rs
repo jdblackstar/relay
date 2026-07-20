@@ -83,16 +83,16 @@ impl Config {
             verified_versions: HashMap::new(),
             blacklist: HashMap::new(),
             central_dir: relay_config_root.join("commands"),
-            central_skills_dir: relay_config_root.join("skills"),
+            central_skills_dir: home.join(".agents/skills"),
             central_agents_dir: relay_config_root.join("agents"),
             central_rules_dir: relay_config_root.join("rules"),
             claude_dir: claude_root.join("commands"),
             claude_skills_dir: claude_root.join("skills"),
             cursor_dir: cursor_root.join("commands"),
             opencode_commands_dir: opencode_root.join("command"),
-            opencode_skills_dir: opencode_root.join("skill"),
+            opencode_skills_dir: home.join(".agents/skills"),
             opencode_agents_file: opencode_root.join("AGENTS.md"),
-            codex_skills_dir: codex_root.join("skills"),
+            codex_skills_dir: home.join(".agents/skills"),
             codex_rules_file: codex_root.join("rules/default.rules"),
             codex_agents_file: codex_root.join("AGENTS.md"),
         })
@@ -165,6 +165,20 @@ impl Config {
             Some(LegacyOpencodeDir::Skills(path)) => Some(path.clone()),
             _ => None,
         };
+        let configured_central_skills = cfg
+            .central_skills_dir
+            .clone()
+            .unwrap_or_else(|| defaults.central_skills_dir.clone());
+        let legacy_central_skills = defaults
+            .central_dir
+            .parent()
+            .map(|root| root.join("skills"));
+        let central_skills_dir =
+            if legacy_central_skills.as_ref() == Some(&configured_central_skills) {
+                defaults.central_skills_dir.clone()
+            } else {
+                configured_central_skills
+            };
         Ok(Self {
             enabled_tools: normalize_tools(
                 cfg.enabled_tools
@@ -176,9 +190,7 @@ impl Config {
             ),
             blacklist: cfg.blacklist.unwrap_or_default(),
             central_dir: cfg.central_dir.unwrap_or(defaults.central_dir),
-            central_skills_dir: cfg
-                .central_skills_dir
-                .unwrap_or(defaults.central_skills_dir),
+            central_skills_dir,
             central_agents_dir: cfg
                 .central_agents_dir
                 .unwrap_or(defaults.central_agents_dir),
@@ -237,6 +249,46 @@ impl Config {
         self.blacklist
             .get(relative_path)
             .is_some_and(|tools| tools.iter().any(|t| t == tool))
+    }
+
+    /// Relay-owned state lives beside the command/agent/rule stores, not in the
+    /// user-owned shared skills directory.
+    pub(crate) fn skill_state_path(&self) -> io::Result<PathBuf> {
+        let root = self.central_dir.parent().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, "central_dir has no parent")
+        })?;
+        Ok(root.join("runtime/skills-state.toml"))
+    }
+
+    /// Locations used by older Relay releases or by tools before they adopted
+    /// the shared skills directory. These are migration/import sources only.
+    pub(crate) fn legacy_skill_import_dirs(&self) -> io::Result<Vec<PathBuf>> {
+        let home = resolve_home_dir()?.ok_or_else(|| {
+            io::Error::new(io::ErrorKind::NotFound, "could not resolve home directory")
+        })?;
+        let relay_root = resolve_relay_config_root(&home)?;
+        if self.central_skills_dir != home.join(".agents/skills") {
+            return Ok(Vec::new());
+        }
+        let codex_root = resolve_tool_home(&home, "CODEX_HOME", ".codex")?;
+        let opencode_root = resolve_tool_home(&home, "OPENCODE_HOME", ".config/opencode")?;
+        let mut dirs = vec![
+            relay_root.join("skills"),
+            codex_root.join("skills"),
+            opencode_root.join("skill"),
+            opencode_root.join("skills"),
+        ];
+        dirs.sort();
+        dirs.dedup();
+        dirs.retain(|path| path != &self.central_skills_dir);
+        Ok(dirs)
+    }
+
+    pub(crate) fn is_legacy_skill_import_dir(&self, path: &Path) -> io::Result<bool> {
+        Ok(self
+            .legacy_skill_import_dirs()?
+            .iter()
+            .any(|dir| dir == path))
     }
 
     /// Returns `true` when a config file exists at the primary or legacy path.
@@ -679,14 +731,15 @@ mod tests {
 
         let cfg = Config::default_paths()?;
         assert_eq!(cfg.central_dir, home.join(".config/relay/commands"));
-        assert_eq!(cfg.codex_skills_dir, home.join("codex_root/skills"));
+        assert_eq!(cfg.central_skills_dir, home.join(".agents/skills"));
+        assert_eq!(cfg.codex_skills_dir, home.join(".agents/skills"));
         assert_eq!(cfg.claude_dir, home.join("claude_root/commands"));
         assert_eq!(cfg.claude_skills_dir, home.join("claude_root/skills"));
         assert_eq!(
             cfg.opencode_commands_dir,
             home.join("opencode_root/command")
         );
-        assert_eq!(cfg.opencode_skills_dir, home.join("opencode_root/skill"));
+        assert_eq!(cfg.opencode_skills_dir, home.join(".agents/skills"));
         assert_eq!(
             cfg.opencode_agents_file,
             home.join("opencode_root/AGENTS.md")
@@ -719,10 +772,10 @@ mod tests {
 
         let cfg = Config::default_paths()?;
         assert_eq!(cfg.central_dir, xdg.join("relay/commands"));
-        assert_eq!(cfg.central_skills_dir, xdg.join("relay/skills"));
+        assert_eq!(cfg.central_skills_dir, home.join(".agents/skills"));
         assert_eq!(cfg.central_agents_dir, xdg.join("relay/agents"));
         assert_eq!(cfg.central_rules_dir, xdg.join("relay/rules"));
-        assert_eq!(cfg.codex_skills_dir, xdg.join("codex/skills"));
+        assert_eq!(cfg.codex_skills_dir, home.join(".agents/skills"));
         assert_eq!(cfg.claude_dir, home.join(".claude/commands"));
 
         set_env("RELAY_HOME", None);
@@ -747,7 +800,7 @@ mod tests {
         set_env("CODEX_HOME", Some("${XDG_CONFIG_HOME}/codex"));
 
         let cfg = Config::default_paths()?;
-        assert_eq!(cfg.codex_skills_dir, os_home.join(".xdg/codex/skills"));
+        assert_eq!(cfg.codex_skills_dir, relay_home.join(".agents/skills"));
 
         set_env("RELAY_HOME", None);
         set_env("XDG_CONFIG_HOME", None);
@@ -887,6 +940,32 @@ opencode_dir = "/legacy/opencode/command"
             cfg.opencode_commands_dir,
             PathBuf::from("/legacy/opencode/command")
         );
+        set_env("RELAY_HOME", None);
+        Ok(())
+    }
+
+    #[test]
+    fn load_migrates_legacy_default_central_skills_path() -> io::Result<()> {
+        let _lock = env_lock();
+        let tmp = TempDir::new()?;
+        let home = tmp.path().join("home");
+        fs::create_dir_all(home.join(".config/relay"))?;
+        set_env("RELAY_HOME", Some(home.to_string_lossy().as_ref()));
+        let config_path = Config::config_path()?;
+        fs::write(
+            &config_path,
+            format!(
+                "central_skills_dir = \"{}\"\n",
+                home.join(".config/relay/skills").display()
+            ),
+        )?;
+
+        let cfg = Config::load_or_default()?;
+
+        assert_eq!(cfg.central_skills_dir, home.join(".agents/skills"));
+        assert!(cfg
+            .legacy_skill_import_dirs()?
+            .contains(&home.join(".config/relay/skills")));
         set_env("RELAY_HOME", None);
         Ok(())
     }
@@ -1093,7 +1172,7 @@ central_dir = "${UNSUPPORTED_VAR}/relay/commands"
         set_env("CODEX_HOME", Some("/tmp/codex"));
 
         let cfg = Config::default_paths()?;
-        assert_eq!(cfg.codex_skills_dir, PathBuf::from("/tmp/codex/skills"));
+        assert_eq!(cfg.codex_skills_dir, home.join(".agents/skills"));
 
         set_env("RELAY_HOME", None);
         set_env("CODEX_HOME", None);

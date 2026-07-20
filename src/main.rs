@@ -600,6 +600,9 @@ fn print_service_status(cfg: &config::Config) -> std::io::Result<()> {
     if let Some(logs_hint) = status.logs_hint.as_ref() {
         println!("status: logs={logs_hint}");
     }
+    for line in sync::skill_diagnostics(cfg)? {
+        println!("{line}");
+    }
     Ok(())
 }
 
