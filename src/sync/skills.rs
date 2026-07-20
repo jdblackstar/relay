@@ -282,6 +282,17 @@ pub(crate) fn sync_skills_with_mode(
             .transpose()?;
         let entry = state.skills.entry(name.clone()).or_default();
 
+        // Recreating a tombstoned canonical skill is an explicit restore. Drop
+        // stale adapter ownership before reconciliation so a preserved adapter
+        // cannot overwrite the newly restored canonical contents.
+        if entry.tombstoned {
+            if let Some(canonical) = canonical.as_ref() {
+                entry.tombstoned = false;
+                entry.canonical_hash = Some(persisted_hash(canonical.digest.body_hash));
+                entry.adapter_hashes.clear();
+            }
+        }
+
         // A previously observed canonical skill disappearing is an explicit
         // deletion. Keep a tombstone so stale native copies cannot resurrect it.
         if canonical.is_none() && entry.canonical_hash.is_some() {
@@ -920,6 +931,37 @@ mod tests {
 
         assert!(cfg.claude_skills_dir.join("plan/SKILL.md").exists());
         assert!(!cfg.central_skills_dir.join("plan").exists());
+        Ok(())
+    }
+
+    #[test]
+    fn recreated_canonical_skill_wins_over_preserved_adapter() -> io::Result<()> {
+        let (_tmp, cfg) = setup()?;
+        let central = write_skill(&cfg.central_skills_dir, "plan", &doc("plan", "Original"))?;
+        sync_skills(&cfg, SyncLogMode::Quiet)?;
+        write_plain(
+            &cfg.claude_skills_dir.join("plan/SKILL.md"),
+            &doc("plan", "Preserved adapter edit"),
+        )?;
+        fs::remove_dir_all(central)?;
+        sync_skills(&cfg, SyncLogMode::Quiet)?;
+        assert!(cfg.claude_skills_dir.join("plan/SKILL.md").exists());
+
+        write_skill(
+            &cfg.central_skills_dir,
+            "plan",
+            &doc("plan", "Restored canonical"),
+        )?;
+        sync_skills(&cfg, SyncLogMode::Quiet)?;
+
+        assert_eq!(
+            read_markdown(&cfg.central_skills_dir.join("plan/SKILL.md"))?.body,
+            "Restored canonical"
+        );
+        assert_eq!(
+            read_markdown(&cfg.claude_skills_dir.join("plan/SKILL.md"))?.body,
+            "Restored canonical"
+        );
         Ok(())
     }
 
