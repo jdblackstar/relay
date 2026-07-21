@@ -55,6 +55,11 @@ struct SkillLocation {
     import_managed: bool,
 }
 
+pub(crate) struct SkillSyncOutcome {
+    pub(crate) stats: SyncStats,
+    pub(crate) codex_real_skill_names: HashSet<String>,
+}
+
 pub(crate) fn diagnostics(cfg: &Config) -> io::Result<Vec<String>> {
     let canonical = list_skills_if_exists(&cfg.central_skills_dir, true)?;
     let state = load_skill_state(&cfg.skill_state_path()?)?;
@@ -232,13 +237,14 @@ impl super::shared::ConflictVariant for SkillVariant {
 pub(crate) fn sync_skills(cfg: &Config, log_mode: SyncLogMode) -> io::Result<SyncStats> {
     let mut history = None;
     let mut conflicts = Vec::new();
-    sync_skills_with_mode(
+    Ok(sync_skills_with_mode(
         cfg,
         log_mode,
         ExecutionMode::Apply,
         &mut history,
         &mut conflicts,
-    )
+    )?
+    .stats)
 }
 
 pub(crate) fn sync_skills_with_mode(
@@ -247,8 +253,10 @@ pub(crate) fn sync_skills_with_mode(
     mode: ExecutionMode,
     history: &mut Option<HistoryRecorder>,
     conflicts: &mut Vec<SyncConflict>,
-) -> io::Result<SyncStats> {
+) -> io::Result<SkillSyncOutcome> {
     let mut stats = SyncStats::default();
+    let mut codex_real_skill_names = HashSet::new();
+    let codex_skills_enabled = codex_skills_target_enabled(cfg);
 
     let state_path = cfg.skill_state_path()?;
     let mut state = load_skill_state(&state_path)?;
@@ -450,16 +458,24 @@ pub(crate) fn sync_skills_with_mode(
                 path: central_path.clone(),
                 digest: winner.digest,
             });
+            let action = if mode == ExecutionMode::Plan {
+                "would import"
+            } else {
+                "imported"
+            };
             log_action(
                 log_mode,
                 &format!(
-                    "skills: imported '{name}' from {} into canonical store",
+                    "skills: {action} '{name}' from {} into canonical store",
                     winner.tool
                 ),
             );
         }
 
         let Some(canonical) = canonical else { continue };
+        if codex_skills_enabled && !cfg.is_blacklisted(&format!("skills/{name}"), TOOL_CODEX) {
+            codex_real_skill_names.insert(name.clone());
+        }
         entry.tombstoned = false;
         entry.canonical_hash = Some(persisted_hash(canonical.digest.body_hash));
         for (location, map) in locations.iter().zip(&location_maps) {
@@ -489,24 +505,10 @@ pub(crate) fn sync_skills_with_mode(
     if mode == ExecutionMode::Apply {
         save_skill_state(&state_path, &state)?;
     }
-    Ok(stats)
-}
-
-pub(super) fn codex_real_skill_names(cfg: &Config) -> io::Result<HashSet<String>> {
-    let mut names = HashSet::new();
-    if !codex_skills_target_enabled(cfg) {
-        return Ok(names);
-    }
-
-    if cfg.central_skills_dir.exists() {
-        for name in list_skill_dirs(&cfg.central_skills_dir)?.into_keys() {
-            if !cfg.is_blacklisted(&format!("skills/{name}"), TOOL_CODEX) {
-                names.insert(name);
-            }
-        }
-    }
-
-    Ok(names)
+    Ok(SkillSyncOutcome {
+        stats,
+        codex_real_skill_names,
+    })
 }
 
 pub(super) fn codex_skills_target_enabled(cfg: &Config) -> bool {
@@ -608,10 +610,6 @@ fn merge_skill_frontmatter(
         &mut history,
     )?;
     Ok(())
-}
-
-fn list_skill_dirs(dir: &Path) -> io::Result<HashMap<String, PathBuf>> {
-    list_skill_dirs_with_policy(dir, true)
 }
 
 fn list_skill_dirs_with_policy(
@@ -1099,7 +1097,7 @@ mod tests {
         write_plain(&generated.join(RELAY_COMMAND_SKILL_MARKER), "generated")?;
         write_plain(&dir.join("notadir"), "file")?;
 
-        let list = list_skill_dirs(&dir)?;
+        let list = list_skill_dirs_with_policy(&dir, true)?;
         assert!(list.contains_key("valid"));
         assert!(!list.contains_key("missing"));
         assert!(!list.contains_key("generated"));
