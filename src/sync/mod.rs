@@ -102,21 +102,21 @@ pub(crate) fn sync_all_with_mode(
         None
     };
     let mut conflicts = Vec::new();
-    let reserved_codex_skill_names = skills::codex_real_skill_names(cfg)?;
-    let skills = skills::sync_skills_with_mode(cfg, log_mode, mode, &mut history, &mut conflicts)?;
+    let skill_outcome =
+        skills::sync_skills_with_mode(cfg, log_mode, mode, &mut history, &mut conflicts)?;
     let commands = commands::sync_commands_with_reserved_codex_skill_names(
         cfg,
         log_mode,
         mode,
         &mut history,
         &mut conflicts,
-        &reserved_codex_skill_names,
+        &skill_outcome.codex_real_skill_names,
     )?;
     let agents = agents::sync_agents_with_mode(cfg, log_mode, mode, &mut history, &mut conflicts)?;
     let rules = rules::sync_rules_with_mode(cfg, log_mode, mode, &mut history, &mut conflicts)?;
     let report = SyncReport {
         commands,
-        skills,
+        skills: skill_outcome.stats,
         agents,
         rules,
     };
@@ -220,6 +220,48 @@ mod tests {
             .codex_skills_dir
             .join(format!(
                 "map/{}",
+                crate::markers::RELAY_COMMAND_SKILL_MARKER
+            ))
+            .exists());
+        Ok(())
+    }
+
+    #[test]
+    fn sync_plan_projects_imported_skill_names_before_command_wrappers() -> io::Result<()> {
+        fn setup_collision() -> io::Result<(tempfile::TempDir, Config)> {
+            let (tmp, cfg) = setup()?;
+            write_plain(&cfg.central_dir.join("review.md"), "Review command body.")?;
+            write_skill(
+                &cfg.claude_skills_dir,
+                "review",
+                &doc("review", "Real skill body."),
+            )?;
+            Ok((tmp, cfg))
+        }
+
+        let (_plan_tmp, plan_cfg) = setup_collision()?;
+        let plan = sync_all_with_mode(&plan_cfg, LogMode::Quiet, ExecutionMode::Plan, "sync")?;
+        assert!(!plan_cfg.central_skills_dir.join("review").exists());
+
+        let (_apply_tmp, apply_cfg) = setup_collision()?;
+        let apply = sync_all_with_mode(&apply_cfg, LogMode::Quiet, ExecutionMode::Apply, "sync")?;
+
+        assert_eq!(plan.report.skills.updated, 3);
+        assert_eq!(apply.report.skills.updated, 3);
+        assert_eq!(plan.report.commands.updated, 3);
+        assert_eq!(apply.report.commands.updated, 3);
+        assert!(
+            fs::read_to_string(apply_cfg.central_skills_dir.join("review/SKILL.md"))?
+                .contains("Real skill body.")
+        );
+        assert!(
+            fs::read_to_string(apply_cfg.codex_skills_dir.join("review/SKILL.md"))?
+                .contains("Real skill body.")
+        );
+        assert!(!apply_cfg
+            .codex_skills_dir
+            .join(format!(
+                "review/{}",
                 crate::markers::RELAY_COMMAND_SKILL_MARKER
             ))
             .exists());
