@@ -246,14 +246,20 @@ mod tests {
         let (_apply_tmp, apply_cfg) = setup_collision()?;
         let apply = sync_all_with_mode(&apply_cfg, LogMode::Quiet, ExecutionMode::Apply, "sync")?;
 
-        assert_eq!(plan.report.skills.updated, apply.report.skills.updated);
-        assert_eq!(plan.report.commands.updated, apply.report.commands.updated);
+        assert_eq!(plan.report.skills.updated, 3);
+        assert_eq!(apply.report.skills.updated, 3);
+        assert_eq!(plan.report.commands.updated, 3);
+        assert_eq!(apply.report.commands.updated, 3);
         assert!(
             fs::read_to_string(apply_cfg.central_skills_dir.join("review/SKILL.md"))?
                 .contains("Real skill body.")
         );
+        assert!(
+            fs::read_to_string(apply_cfg.codex_skills_dir.join("review/SKILL.md"))?
+                .contains("Real skill body.")
+        );
         assert!(!apply_cfg
-            .central_skills_dir
+            .codex_skills_dir
             .join(format!(
                 "review/{}",
                 crate::markers::RELAY_COMMAND_SKILL_MARKER
