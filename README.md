@@ -72,6 +72,8 @@ Or download a release archive from GitHub and place the `relay` binary on your P
 ```sh
 relay [--debug] [--debug-log-file <path>] init
 relay [--debug] [--debug-log-file <path>] sync [-p|--plan|-a|--apply] [-v|--verbose|-q|--quiet] [--fail-on-conflict] [-c|--confirm-versions]
+relay [--debug] [--debug-log-file <path>] sync skill [-p|--plan|-a|--apply] [-v|--verbose|-q|--quiet] [--fail-on-conflict] [-c|--confirm-versions] <path>...
+relay [--debug] [--debug-log-file <path>] capabilities [--json]
 relay [--debug] [--debug-log-file <path>] watch [-b|--debounce-ms 300] [-q|--quiet] [-d|--daemon] [-c|--confirm-versions]
 relay [--debug] [--debug-log-file <path>] status
 relay [--debug] [--debug-log-file <path>] daemon install [-b|--debounce-ms 300] [-q|--quiet] [-c|--confirm-versions]
@@ -96,6 +98,8 @@ Init detects installed tool directories and lets you pick which ones to sync.
 Use Space to toggle selections and Enter to confirm.
 `relay sync --plan` previews changes without writing files.
 `relay sync --fail-on-conflict` stops before writing if relay finds competing edits.
+`relay sync skill PATH...` narrows discovery and reconciliation to the selected
+skill packages. Paths are positional operands suitable for shell completion.
 `relay history` lists recorded sync/watch/rollback events.
 Watch-triggered history entries include source context in `origin` when
 available (example: `watch:codex:review.md`).
@@ -107,6 +111,8 @@ available (example: `watch:codex:review.md`).
 - `relay sync --plan`: preview writes without changing files.
 - `relay sync --apply`: execute writes and record a history event.
 - `relay sync --fail-on-conflict`: abort before apply writes when sync finds conflicts.
+- `relay sync skill PATH...`: reconcile only explicitly selected skills; commands,
+  agents, rules, and unrelated skills are not reconciled or changed.
 - `relay watch`: auto-apply writes on file events and record history events.
 - `relay watch --daemon`: run watch as native background service.
 - `relay rollback`: restore paths from a recorded event.
@@ -146,6 +152,43 @@ or tombstone owns the name. Hidden entries, generated command wrappers,
 symlinked skill roots, and directories carrying `.system`, `.plugin`,
 `.managed`, or `.relay-managed` markers are excluded from migration imports.
 Custom `central_skills_dir` values remain authoritative.
+
+### Scoped skill sync
+
+`relay sync skill PATH...` limits reconciliation to each discovered
+package name. Existing canonical-store ownership, compatibility adapters,
+state, conflicts, history, locking, plan/apply, and atomic publication behavior
+still apply. A selected package outside configured Relay locations can populate
+a missing canonical skill. If it differs from an existing canonical package,
+Relay reports a conflict and refuses all scoped writes. Scoped mode does not run
+command, agent, or rule sync, does not reconcile unrelated skill names, and
+never interprets a missing operand as a deletion.
+
+A directory containing `SKILL.md` is one complete package. A directory without
+`SKILL.md` is searched recursively, including below discovered skill roots. A
+direct path to `SKILL.md` is also accepted. Collection discovery skips `.git`,
+`node_modules`, and directory symlinks. Relay rejects overlapping ancestor and
+descendant skill roots, invalid frontmatter, declared names that differ from
+their parent directory, and duplicate declared names before apply can write.
+
+Once selected, a package is validated and copied independently of collection
+discovery exclusions. Relay copies all regular files and directories, including
+hidden content, `.git`, and `node_modules`. Any file or directory symlink inside
+a selected package is a validation error rather than being silently omitted.
+Selecting a missing path is an error; targeted removal is not supported.
+
+Machine callers can rely on exit status: success exits 0, while invalid input,
+collision, lock, conflict-abort, or write failures exit nonzero. Callers do not
+need to parse human output.
+
+Probe support with `relay capabilities --json`:
+
+```json
+{"schema_version":1,"capabilities":{"skills.sync.scoped":1}}
+```
+
+The schema and capability versions are independent integers. Relay versions
+without this command should be treated as not supporting scoped skill sync.
 
 ## Debugging
 
