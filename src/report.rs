@@ -24,6 +24,21 @@ pub(crate) fn print_plan_summary(report: &SyncReport) {
 
 pub(crate) fn print_conflict_summary(conflicts: &[SyncConflict]) {
     println!("conflicts: {} detected", conflicts.len());
+    print_conflict_details(conflicts);
+    println!(
+        "sync aborted due to conflicts; rerun without --fail-on-conflict to accept newest-wins"
+    );
+}
+
+pub(crate) fn print_scoped_conflict_summary(conflicts: &[SyncConflict]) {
+    println!("conflicts: {} detected", conflicts.len());
+    print_conflict_details(conflicts);
+    println!(
+        "scoped sync aborted: selected packages that differ from the canonical store cannot overwrite it"
+    );
+}
+
+fn print_conflict_details(conflicts: &[SyncConflict]) {
     for conflict in conflicts {
         let kind = match conflict.kind {
             SyncItemKind::Command => "command",
@@ -42,9 +57,6 @@ pub(crate) fn print_conflict_summary(conflicts: &[SyncConflict]) {
             );
         }
     }
-    println!(
-        "sync aborted due to conflicts; rerun without --fail-on-conflict to accept newest-wins"
-    );
 }
 
 #[cfg(test)]
@@ -84,5 +96,6 @@ mod tests {
             },
         ];
         print_conflict_summary(&conflicts);
+        print_scoped_conflict_summary(&conflicts);
     }
 }

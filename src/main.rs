@@ -6,6 +6,7 @@ mod history;
 mod init;
 mod logging;
 mod markers;
+mod path_cleanup;
 mod process_lock;
 mod report;
 mod sync;
@@ -13,7 +14,7 @@ mod tools;
 mod versions;
 mod watch;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueHint};
 use std::path::PathBuf;
 
 #[cfg(test)]
@@ -46,23 +47,31 @@ enum Commands {
     /// Sync command and skill files across tools
     Sync {
         /// Show per-action output
-        #[arg(short = 'v', long, conflicts_with = "quiet")]
+        #[arg(short = 'v', long, global = true, conflicts_with = "quiet")]
         verbose: bool,
         /// Suppress all output
-        #[arg(short = 'q', long, conflicts_with = "verbose")]
+        #[arg(short = 'q', long, global = true, conflicts_with = "verbose")]
         quiet: bool,
         /// Prompt if verified tool versions differ
-        #[arg(short = 'c', long)]
+        #[arg(short = 'c', long, global = true)]
         confirm_versions: bool,
         /// Preview changes without writing files
-        #[arg(short = 'p', long, conflicts_with = "apply")]
+        #[arg(short = 'p', long, global = true, conflicts_with = "apply")]
         plan: bool,
         /// Explicitly apply changes (default behavior)
-        #[arg(short = 'a', long, conflicts_with = "plan")]
+        #[arg(short = 'a', long, global = true, conflicts_with = "plan")]
         apply: bool,
         /// Abort without writing if sync detects conflicts
-        #[arg(long)]
+        #[arg(long, global = true)]
         fail_on_conflict: bool,
+        #[command(subcommand)]
+        scope: Option<SyncScope>,
+    },
+    /// Show supported machine-readable capabilities
+    Capabilities {
+        /// Print the versioned capability document as JSON
+        #[arg(long, required = true)]
+        json: bool,
     },
     /// Watch folders and sync changes
     Watch {
@@ -139,6 +148,16 @@ enum Commands {
 }
 
 #[derive(Subcommand)]
+enum SyncScope {
+    /// Sync only skill packages selected by path
+    Skill {
+        /// Skill package, SKILL.md, or collection directory paths
+        #[arg(required = true, num_args = 1.., value_hint = ValueHint::AnyPath)]
+        paths: Vec<PathBuf>,
+    },
+}
+
+#[derive(Subcommand)]
 enum DaemonCommand {
     /// Install or update the watch service definition
     Install {
@@ -201,11 +220,21 @@ where
 
 #[cfg_attr(test, allow(dead_code))]
 fn load_cfg(require_initialized: bool) -> std::io::Result<config::Config> {
+    load_cfg_with_hint(require_initialized, true)
+}
+
+#[cfg_attr(any(test, coverage), allow(dead_code, unused_variables))]
+fn load_cfg_with_hint(
+    require_initialized: bool,
+    show_uninitialized_hint: bool,
+) -> std::io::Result<config::Config> {
     if require_initialized {
         require_initialized_config()?;
     } else {
         #[cfg(all(not(any(test, coverage)), not(windows)))]
-        warn_if_not_initialized();
+        if show_uninitialized_hint {
+            warn_if_not_initialized();
+        }
     }
     config::Config::load_or_default()
 }
@@ -286,6 +315,53 @@ fn run_sync_command(
         fail_on_conflict,
         |run_log_mode, run_mode| sync::sync_all_with_mode(cfg, run_log_mode, run_mode, "sync"),
     )
+}
+
+#[cfg_attr(test, allow(dead_code))]
+fn run_scoped_sync_command(
+    cfg: &config::Config,
+    selected: &[sync::ScopedSkill],
+    log_mode: sync::LogMode,
+    quiet: bool,
+    mode: sync::ExecutionMode,
+) -> std::io::Result<sync::SyncOutcome> {
+    run_scoped_sync_command_with(log_mode, quiet, mode, |run_log_mode, run_mode| {
+        sync::sync_scoped_skills_with_mode(cfg, selected, run_log_mode, run_mode, "sync:scoped")
+    })
+}
+
+fn run_scoped_sync_command_with<F>(
+    log_mode: sync::LogMode,
+    quiet: bool,
+    mode: sync::ExecutionMode,
+    mut run_sync: F,
+) -> std::io::Result<sync::SyncOutcome>
+where
+    F: FnMut(sync::LogMode, sync::ExecutionMode) -> std::io::Result<sync::SyncOutcome>,
+{
+    let reject_conflicts = |outcome: sync::SyncOutcome| {
+        if !outcome.has_conflicts() {
+            return Ok(outcome);
+        }
+        if !quiet {
+            report::print_scoped_conflict_summary(&outcome.conflicts);
+        }
+        Err(std::io::Error::other(format!(
+            "scoped sync aborted due to canonical conflicts ({})",
+            outcome.conflicts.len()
+        )))
+    };
+
+    let preflight = reject_conflicts(run_sync(sync::LogMode::Quiet, sync::ExecutionMode::Plan)?)?;
+
+    if mode == sync::ExecutionMode::Plan {
+        if log_mode == sync::LogMode::Actions {
+            return reject_conflicts(run_sync(log_mode, mode)?);
+        }
+        return Ok(preflight);
+    }
+
+    reject_conflicts(run_sync(log_mode, mode)?)
 }
 
 fn run_sync_command_with<F>(
@@ -369,24 +445,59 @@ fn main() -> std::io::Result<()> {
             plan,
             apply: _apply,
             fail_on_conflict,
+            scope,
         } => {
+            let skill_paths = scope.map(|SyncScope::Skill { paths }| paths);
             let mode = if plan {
                 sync::ExecutionMode::Plan
             } else {
                 sync::ExecutionMode::Apply
             };
-            let cfg = load_cfg(sync_requires_initialized_config(mode))?;
-            if !confirm_versions_or_continue(&cfg, confirm_versions)? {
-                return Ok(());
-            }
             logging::debug(&format!(
-                "command=sync mode={mode:?} verbose={verbose} quiet={quiet} confirm_versions={confirm_versions} fail_on_conflict={fail_on_conflict}"
+                "command=sync mode={mode:?} verbose={verbose} quiet={quiet} confirm_versions={confirm_versions} fail_on_conflict={fail_on_conflict} scoped_skills={}",
+                skill_paths.as_ref().map_or(0, Vec::len)
             ));
             let log_mode = if verbose {
                 sync::LogMode::Actions
             } else {
                 sync::LogMode::Quiet
             };
+            let cfg = load_cfg_with_hint(sync_requires_initialized_config(mode), !quiet)?;
+            if !confirm_versions_or_continue(&cfg, confirm_versions)? {
+                return Ok(());
+            }
+            if let Some(skill_paths) = skill_paths.as_ref() {
+                let run = || {
+                    let selected = sync::discover_scoped_skills(skill_paths)?;
+                    run_scoped_sync_command(&cfg, &selected, log_mode, quiet, mode)
+                };
+                let outcome = if sync_requires_process_lock(mode) {
+                    with_process_lock("sync:scoped", run)?
+                } else {
+                    run()?
+                };
+                logging::debug(&format!(
+                    "sync finished commands={} skills={} agents={} rules={} conflicts={} history_event_id={}",
+                    outcome.report.commands.updated,
+                    outcome.report.skills.updated,
+                    outcome.report.agents.updated,
+                    outcome.report.rules.updated,
+                    outcome.conflicts.len(),
+                    outcome.history_event_id.as_deref().unwrap_or("none")
+                ));
+                if !quiet {
+                    if mode == sync::ExecutionMode::Plan {
+                        report::print_plan_summary(&outcome.report);
+                    } else {
+                        report::print_sync_summary(&outcome.report);
+                        if let Some(event_id) = outcome.history_event_id.as_deref() {
+                            println!("history: recorded event {event_id}");
+                        }
+                    }
+                }
+                return Ok(());
+            }
+
             let outcome = if sync_requires_process_lock(mode) {
                 with_process_lock("sync", || {
                     run_sync_command(&cfg, log_mode, quiet, mode, fail_on_conflict)
@@ -408,11 +519,17 @@ fn main() -> std::io::Result<()> {
                     report::print_plan_summary(&outcome.report);
                 } else {
                     report::print_sync_summary(&outcome.report);
-                    if let Some(event_id) = outcome.history_event_id {
+                    if let Some(event_id) = outcome.history_event_id.as_deref() {
                         println!("history: recorded event {event_id}");
                     }
                 }
             }
+            Ok(())
+        }
+        Commands::Capabilities { json: _ } => {
+            const JSON: &str = r#"{"schema_version":1,"capabilities":{"skills.sync.scoped":1}}"#;
+            logging::debug("command=capabilities json=true");
+            println!("{JSON}");
             Ok(())
         }
         Commands::Watch {
@@ -611,12 +728,39 @@ fn main() {}
 
 #[cfg(test)]
 mod tests {
-    use super::{Cli, Commands};
+    use super::{Cli, Commands, SyncScope};
     use crate::history::{HistoryRecorder, HistoryStore};
     use crate::sync;
     use crate::sync::test_support::{setup, write_plain};
     use clap::Parser;
     use std::io;
+    use std::path::PathBuf;
+
+    fn parse_scoped_sync(args: &[&str]) -> (Vec<PathBuf>, [bool; 6]) {
+        match Cli::try_parse_from(args.iter().copied()).unwrap().command {
+            Commands::Sync {
+                verbose,
+                quiet,
+                confirm_versions,
+                plan,
+                apply,
+                fail_on_conflict,
+                scope: Some(SyncScope::Skill { paths }),
+                ..
+            } => (
+                paths,
+                [
+                    plan,
+                    apply,
+                    verbose,
+                    quiet,
+                    confirm_versions,
+                    fail_on_conflict,
+                ],
+            ),
+            _ => panic!("expected scoped skill sync"),
+        }
+    }
 
     #[test]
     fn main_stub_runs() {
@@ -653,6 +797,96 @@ mod tests {
     }
 
     #[test]
+    fn cli_parses_multiple_positional_skill_paths() {
+        let (paths, flags) = parse_scoped_sync(&[
+            "relay",
+            "sync",
+            "skill",
+            "--plan",
+            "/tmp/one",
+            "/tmp/two/SKILL.md",
+        ]);
+        assert_eq!(paths.len(), 2);
+        assert!(flags[0]);
+    }
+
+    #[test]
+    fn cli_accepts_sync_options_on_either_side_of_skill_mode() {
+        let (before_paths, before_flags) =
+            parse_scoped_sync(&["relay", "sync", "--plan", "skill", "/tmp/one"]);
+        let (after_operand_paths, after_operand_flags) =
+            parse_scoped_sync(&["relay", "sync", "skill", "/tmp/one", "--plan"]);
+        let (between_paths, between_flags) =
+            parse_scoped_sync(&["relay", "sync", "skill", "/tmp/one", "--quiet", "/tmp/two"]);
+
+        assert_eq!(before_paths, vec![PathBuf::from("/tmp/one")]);
+        assert_eq!(before_flags, [true, false, false, false, false, false]);
+        assert_eq!(after_operand_paths, before_paths);
+        assert_eq!(after_operand_flags, before_flags);
+        assert_eq!(
+            between_paths,
+            vec![PathBuf::from("/tmp/one"), PathBuf::from("/tmp/two")]
+        );
+        assert_eq!(between_flags, [false, false, false, true, false, false]);
+    }
+
+    #[test]
+    fn cli_parses_scoped_sync_short_options_on_either_side_of_skill_mode() {
+        for (option, expected_index) in [("-p", 0), ("-a", 1), ("-v", 2), ("-q", 3), ("-c", 4)] {
+            for args in [
+                vec!["relay", "sync", option, "skill", "/tmp/one"],
+                vec!["relay", "sync", "skill", "/tmp/one", option],
+            ] {
+                let (paths, flags) = parse_scoped_sync(&args);
+                assert_eq!(paths, vec![PathBuf::from("/tmp/one")], "{option}");
+                assert!(flags[expected_index], "{option}");
+                assert_eq!(
+                    flags.iter().filter(|enabled| **enabled).count(),
+                    1,
+                    "{option}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn cli_without_skill_mode_remains_full_sync() {
+        let cli = Cli::try_parse_from(["relay", "sync"]).unwrap();
+        match cli.command {
+            Commands::Sync { scope: None, .. } => {}
+            _ => panic!("expected full sync"),
+        }
+    }
+
+    #[test]
+    fn cli_requires_at_least_one_skill_path() {
+        let err = match Cli::try_parse_from(["relay", "sync", "skill"]) {
+            Ok(_) => panic!("expected clap parsing to fail"),
+            Err(err) => err,
+        };
+        assert!(err.to_string().contains("<PATHS>"));
+    }
+
+    #[test]
+    fn cli_parses_capabilities_json() {
+        let cli = Cli::try_parse_from(["relay", "capabilities", "--json"]).unwrap();
+        match cli.command {
+            Commands::Capabilities { json } => assert!(json),
+            _ => panic!("expected capabilities command"),
+        }
+    }
+
+    #[test]
+    fn cli_requires_capabilities_json() {
+        let err = match Cli::try_parse_from(["relay", "capabilities"]) {
+            Ok(_) => panic!("expected --json to be required"),
+            Err(err) => err,
+        };
+        assert_eq!(err.exit_code(), 2);
+        assert!(err.to_string().contains("--json"));
+    }
+
+    #[test]
     fn cli_parses_sync_plan_fail_on_conflict() {
         let cli = Cli::try_parse_from(["relay", "sync", "--plan", "--fail-on-conflict"]).unwrap();
         match cli.command {
@@ -677,6 +911,21 @@ mod tests {
                 Err(err) => err,
             };
         assert!(err.to_string().contains("--apply"));
+    }
+
+    #[test]
+    fn cli_rejects_conflicting_scoped_sync_flags() {
+        for args in [
+            vec!["relay", "sync", "skill", "--plan", "--apply", "selected"],
+            vec!["relay", "sync", "skill", "--verbose", "--quiet", "selected"],
+        ] {
+            let err = match Cli::try_parse_from(&args) {
+                Ok(_) => panic!("conflicting flags should fail: {args:?}"),
+                Err(err) => err,
+            };
+            assert_eq!(err.exit_code(), 2, "{args:?}");
+            assert!(err.to_string().contains("cannot be used with"), "{args:?}");
+        }
     }
 
     #[test]
@@ -709,6 +958,52 @@ mod tests {
             ]
         );
         assert_eq!(outcome.report.commands.updated, 1);
+    }
+
+    #[test]
+    fn scoped_apply_rejects_conflict_found_by_second_evaluation() {
+        let mut calls = Vec::new();
+        let mut writes = 0usize;
+        let err = super::run_scoped_sync_command_with(
+            sync::LogMode::Quiet,
+            true,
+            sync::ExecutionMode::Apply,
+            |log_mode, mode| {
+                calls.push((log_mode, mode));
+                let conflicts = if mode == sync::ExecutionMode::Apply {
+                    vec![sync::SyncConflict {
+                        kind: sync::SyncItemKind::Skill,
+                        name: "raced".to_string(),
+                        winner: "central",
+                        others: vec!["selected input"],
+                    }]
+                } else {
+                    Vec::new()
+                };
+                if mode == sync::ExecutionMode::Apply && conflicts.is_empty() {
+                    writes += 1;
+                }
+                Ok(sync::SyncOutcome {
+                    report: sync::SyncReport::default(),
+                    conflicts,
+                    history_event_id: None,
+                })
+            },
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            calls,
+            vec![
+                (sync::LogMode::Quiet, sync::ExecutionMode::Plan),
+                (sync::LogMode::Quiet, sync::ExecutionMode::Apply),
+            ]
+        );
+        assert_eq!(writes, 0);
+        assert_eq!(
+            err.to_string(),
+            "scoped sync aborted due to canonical conflicts (1)"
+        );
     }
 
     #[test]

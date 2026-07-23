@@ -21,6 +21,7 @@ libc = "0.2.154"
 notify = "6.1.1"
 serde = { version = "1.0.203", features = ["derive"] }
 toml = "0.8.14"
+unicode-normalization = "0.1.24"
 
 [dev-dependencies]
 filetime = "0.2.23"
