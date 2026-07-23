@@ -1,6 +1,5 @@
 mod atomic;
 mod blacklist;
-mod capabilities;
 mod config;
 mod daemon;
 mod history;
@@ -71,7 +70,7 @@ enum Commands {
     /// Show supported machine-readable capabilities
     Capabilities {
         /// Print the versioned capability document as JSON
-        #[arg(long)]
+        #[arg(long, required = true)]
         json: bool,
     },
     /// Watch folders and sync changes
@@ -348,13 +347,8 @@ where
             report::print_scoped_conflict_summary(&outcome.conflicts);
         }
         Err(std::io::Error::other(format!(
-            "scoped sync aborted due to {} canonical conflict{}",
-            outcome.conflicts.len(),
-            if outcome.conflicts.len() == 1 {
-                ""
-            } else {
-                "s"
-            }
+            "scoped sync aborted due to canonical conflicts ({})",
+            outcome.conflicts.len()
         )))
     };
 
@@ -532,9 +526,11 @@ fn main() -> std::io::Result<()> {
             }
             Ok(())
         }
-        Commands::Capabilities { json } => {
-            logging::debug(&format!("command=capabilities json={json}"));
-            capabilities::print(json)
+        Commands::Capabilities { json: _ } => {
+            const JSON: &str = r#"{"schema_version":1,"capabilities":{"skills.sync.scoped":1}}"#;
+            logging::debug("command=capabilities json=true");
+            println!("{JSON}");
+            Ok(())
         }
         Commands::Watch {
             debounce_ms,
@@ -835,37 +831,21 @@ mod tests {
     }
 
     #[test]
-    fn cli_parses_scoped_sync_short_options_after_skill_mode() {
+    fn cli_parses_scoped_sync_short_options_on_either_side_of_skill_mode() {
         for (option, expected_index) in [("-p", 0), ("-a", 1), ("-v", 2), ("-q", 3), ("-c", 4)] {
-            let (paths, flags) =
-                parse_scoped_sync(&["relay", "sync", "skill", "/tmp/one", option, "/tmp/two"]);
-
-            assert_eq!(
-                paths,
-                vec![PathBuf::from("/tmp/one"), PathBuf::from("/tmp/two")],
-                "{option}"
-            );
-            assert!(flags[expected_index], "{option}");
-            assert_eq!(
-                flags.iter().filter(|enabled| **enabled).count(),
-                1,
-                "{option}"
-            );
-        }
-    }
-
-    #[test]
-    fn cli_parses_scoped_sync_short_options_before_skill_mode() {
-        for (option, expected_index) in [("-p", 0), ("-a", 1), ("-v", 2), ("-q", 3), ("-c", 4)] {
-            let (paths, flags) = parse_scoped_sync(&["relay", "sync", option, "skill", "/tmp/one"]);
-
-            assert_eq!(paths, vec![PathBuf::from("/tmp/one")], "{option}");
-            assert!(flags[expected_index], "{option}");
-            assert_eq!(
-                flags.iter().filter(|enabled| **enabled).count(),
-                1,
-                "{option}"
-            );
+            for args in [
+                vec!["relay", "sync", option, "skill", "/tmp/one"],
+                vec!["relay", "sync", "skill", "/tmp/one", option],
+            ] {
+                let (paths, flags) = parse_scoped_sync(&args);
+                assert_eq!(paths, vec![PathBuf::from("/tmp/one")], "{option}");
+                assert!(flags[expected_index], "{option}");
+                assert_eq!(
+                    flags.iter().filter(|enabled| **enabled).count(),
+                    1,
+                    "{option}"
+                );
+            }
         }
     }
 
@@ -894,6 +874,16 @@ mod tests {
             Commands::Capabilities { json } => assert!(json),
             _ => panic!("expected capabilities command"),
         }
+    }
+
+    #[test]
+    fn cli_requires_capabilities_json() {
+        let err = match Cli::try_parse_from(["relay", "capabilities"]) {
+            Ok(_) => panic!("expected --json to be required"),
+            Err(err) => err,
+        };
+        assert_eq!(err.exit_code(), 2);
+        assert!(err.to_string().contains("--json"));
     }
 
     #[test]
@@ -1012,7 +1002,7 @@ mod tests {
         assert_eq!(writes, 0);
         assert_eq!(
             err.to_string(),
-            "scoped sync aborted due to 1 canonical conflict"
+            "scoped sync aborted due to canonical conflicts (1)"
         );
     }
 

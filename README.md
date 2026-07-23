@@ -73,7 +73,7 @@ Or download a release archive from GitHub and place the `relay` binary on your P
 relay [--debug] [--debug-log-file <path>] init
 relay [--debug] [--debug-log-file <path>] sync [-p|--plan|-a|--apply] [-v|--verbose|-q|--quiet] [--fail-on-conflict] [-c|--confirm-versions]
 relay [--debug] [--debug-log-file <path>] sync skill [-p|--plan|-a|--apply] [-v|--verbose|-q|--quiet] [--fail-on-conflict] [-c|--confirm-versions] <path>...
-relay [--debug] [--debug-log-file <path>] capabilities [--json]
+relay [--debug] [--debug-log-file <path>] capabilities --json
 relay [--debug] [--debug-log-file <path>] watch [-b|--debounce-ms 300] [-q|--quiet] [-d|--daemon] [-c|--confirm-versions]
 relay [--debug] [--debug-log-file <path>] status
 relay [--debug] [--debug-log-file <path>] daemon install [-b|--debounce-ms 300] [-q|--quiet] [-c|--confirm-versions]

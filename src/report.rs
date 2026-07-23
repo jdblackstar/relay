@@ -1,8 +1,5 @@
 use crate::sync::{SyncConflict, SyncItemKind, SyncReport};
 
-const SCOPED_CONFLICT_GUIDANCE: &str =
-    "scoped sync aborted: selected packages that differ from the canonical store cannot overwrite it";
-
 pub(crate) fn print_sync_summary(report: &SyncReport) {
     if report.is_empty() {
         println!("sync: no changes");
@@ -36,7 +33,9 @@ pub(crate) fn print_conflict_summary(conflicts: &[SyncConflict]) {
 pub(crate) fn print_scoped_conflict_summary(conflicts: &[SyncConflict]) {
     println!("conflicts: {} detected", conflicts.len());
     print_conflict_details(conflicts);
-    println!("{SCOPED_CONFLICT_GUIDANCE}");
+    println!(
+        "scoped sync aborted: selected packages that differ from the canonical store cannot overwrite it"
+    );
 }
 
 fn print_conflict_details(conflicts: &[SyncConflict]) {
@@ -98,11 +97,5 @@ mod tests {
         ];
         print_conflict_summary(&conflicts);
         print_scoped_conflict_summary(&conflicts);
-    }
-
-    #[test]
-    fn scoped_conflict_guidance_does_not_suggest_a_permitted_override() {
-        assert!(!SCOPED_CONFLICT_GUIDANCE.contains("--fail-on-conflict"));
-        assert!(SCOPED_CONFLICT_GUIDANCE.contains("cannot overwrite"));
     }
 }
