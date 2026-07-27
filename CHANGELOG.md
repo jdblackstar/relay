@@ -9,9 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Add scoped skill synchronization ([#24](https://github.com/jdblackstar/relay/pull/24))
 - Add versioned capability discovery and path-scoped skill synchronization for
-  machine callers.
+  machine callers ([#24](https://github.com/jdblackstar/relay/pull/24)).
 - Fix migration plan fidelity ([#23](https://github.com/jdblackstar/relay/pull/23))
 - Use plural provider config directories ([#21](https://github.com/jdblackstar/relay/pull/21))
 - Adopt shared user skill store ([#22](https://github.com/jdblackstar/relay/pull/22))
