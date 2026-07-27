@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+
+## [0.2.6] - 2026-07-27
+
+### Added
+
 - Add versioned capability discovery and path-scoped skill synchronization for
   machine callers ([#24](https://github.com/jdblackstar/relay/pull/24)).
 - Fix migration plan fidelity ([#23](https://github.com/jdblackstar/relay/pull/23))
@@ -17,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Filter unrelated filesystem watch events ([#20](https://github.com/jdblackstar/relay/pull/20))
 - Use `~/.agents/skills` as the canonical user skill store, with legacy imports,
   compatibility adapters, reconciliation state, tombstones, and diagnostics.
+
 
 ## [0.2.5] - 2026-07-03
 
@@ -64,5 +70,6 @@ Initial tracked release; earlier history is in git.
 [0.2.3]: https://github.com/jdblackstar/relay/compare/v0.2.2...v0.2.3
 [0.2.4]: https://github.com/jdblackstar/relay/compare/v0.2.3...v0.2.4
 [0.2.5]: https://github.com/jdblackstar/relay/compare/v0.2.4...v0.2.5
-[Unreleased]: https://github.com/jdblackstar/relay/compare/v0.2.5...HEAD
+[0.2.6]: https://github.com/jdblackstar/relay/compare/v0.2.5...v0.2.6
+[Unreleased]: https://github.com/jdblackstar/relay/compare/v0.2.6...HEAD
 [0.2.1]: https://github.com/jdblackstar/relay/releases/tag/v0.2.1
