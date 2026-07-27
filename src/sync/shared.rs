@@ -335,7 +335,7 @@ fn split_frontmatter(contents: &str) -> (Option<String>, String) {
     (None, contents.to_string())
 }
 
-fn parse_required_frontmatter(frontmatter: Option<&str>) -> Option<RequiredFrontmatter> {
+pub(crate) fn parse_required_frontmatter(frontmatter: Option<&str>) -> Option<RequiredFrontmatter> {
     let frontmatter = frontmatter?;
     let mut lines = frontmatter.split_inclusive('\n');
     let first = lines.next()?;
