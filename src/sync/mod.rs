@@ -133,6 +133,56 @@ pub(crate) fn sync_all_with_mode(
     })
 }
 
+#[cfg_attr(any(test, coverage), allow(dead_code))]
+pub(crate) fn sync_skills_only_with_mode(
+    cfg: &Config,
+    log_mode: LogMode,
+    mode: ExecutionMode,
+    origin: &str,
+) -> io::Result<SyncOutcome> {
+    let mut history = if mode == ExecutionMode::Apply {
+        Some(HistoryRecorder::new(cfg, origin)?)
+    } else {
+        None
+    };
+    let mut conflicts = Vec::new();
+    let skill_outcome = match skills::sync_skills_with_mode(
+        cfg,
+        log_mode,
+        mode,
+        &mut history,
+        &mut conflicts,
+    ) {
+        Ok(outcome) => outcome,
+        Err(sync_err) => {
+            if let Some(recorder) = history.take() {
+                if let Err(rollback_err) = recorder.rollback_pending() {
+                    return Err(io::Error::new(
+                        sync_err.kind(),
+                        format!(
+                            "skill migration failed ({sync_err}) and failed to revert earlier writes ({rollback_err})",
+                        ),
+                    ));
+                }
+            }
+            return Err(sync_err);
+        }
+    };
+    let report = SyncReport {
+        skills: skill_outcome.stats,
+        ..SyncReport::default()
+    };
+    let history_event_id = match history {
+        Some(recorder) => recorder.finish()?,
+        None => None,
+    };
+    Ok(SyncOutcome {
+        report,
+        conflicts,
+        history_event_id,
+    })
+}
+
 pub(crate) fn sync_scoped_skills_with_mode(
     cfg: &Config,
     selected: &[ScopedSkill],

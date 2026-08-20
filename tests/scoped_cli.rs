@@ -119,7 +119,7 @@ fn capabilities_json_uses_real_entrypoint_without_initialization() -> io::Result
     assert!(output.status.success());
     assert_eq!(
         utf8(&output.stdout),
-        "{\"schema_version\":1,\"capabilities\":{\"skills.sync.scoped\":1}}\n"
+        "{\"schema_version\":1,\"capabilities\":{\"skills.migrate\":1,\"skills.sync.scoped\":1}}\n"
     );
     assert_eq!(output.stderr, b"");
     assert!(!tmp.path().join(".config/relay").exists());
