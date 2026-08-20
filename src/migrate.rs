@@ -46,12 +46,8 @@ pub(crate) fn run(cfg: &Config, apply: bool, dotfiles: bool) -> io::Result<()> {
     ensure_watcher_stopped(cfg)?;
     let _lock = ProcessLock::acquire("migrate")?;
     reject_conflicts(&plan_skills(cfg, LogMode::Quiet)?)?;
-    if dotfiles {
-        apply_links(&plan_dotfiles(cfg)?)?;
-    }
-
-    let outcome =
-        sync::sync_skills_only_with_mode(cfg, LogMode::Actions, ExecutionMode::Apply, "migrate")?;
+    let apply_plan = dotfiles.then(|| plan_dotfiles(cfg)).transpose()?;
+    let outcome = apply_migration(cfg, apply_plan.as_deref())?;
     report::print_sync_summary(&outcome.report);
     if let Some(event_id) = outcome.history_event_id.as_deref() {
         println!("history: recorded event {event_id}");
@@ -161,7 +157,7 @@ fn plan_link(source: &Path, target: &Path, dotfiles: &Path) -> io::Result<LinkPl
     let target_meta = metadata_if_exists(target)?;
     let action = match (source_meta.as_ref(), target_meta.as_ref()) {
         (Some(source_meta), Some(target_meta)) if source_meta.file_type().is_symlink() => {
-            if resolve_link(source)? != target {
+            if fs::canonicalize(resolve_link(source)?)? != fs::canonicalize(target)? {
                 return refusal("replace unexpected symlink", source, target);
             }
             require_metadata_dir(target_meta, target)?;
@@ -262,20 +258,113 @@ fn print_link_plan(plans: &[LinkPlan]) {
     }
 }
 
-fn apply_links(plans: &[LinkPlan]) -> io::Result<()> {
+fn apply_migration(cfg: &Config, plans: Option<&[LinkPlan]>) -> io::Result<SyncOutcome> {
+    let applied = plans.map(apply_links).transpose()?.unwrap_or_default();
+    match sync::sync_skills_only_with_mode(cfg, LogMode::Actions, ExecutionMode::Apply, "migrate") {
+        Ok(outcome) => Ok(outcome),
+        Err(err) => rollback_after_error(err, &applied),
+    }
+}
+
+fn apply_links(plans: &[LinkPlan]) -> io::Result<Vec<LinkPlan>> {
+    let mut applied = Vec::new();
     for plan in plans {
         let dotfiles = plan.target.parent().ok_or_else(|| {
             io::Error::new(io::ErrorKind::InvalidInput, "dotfiles target has no parent")
         })?;
-        if plan_link(&plan.source, &plan.target, dotfiles)?.action != plan.action {
-            return Err(io::Error::other(format!(
-                "directory state changed after the plan: {}",
-                plan.source.display()
-            )));
+        let result = (|| {
+            if plan_link(&plan.source, &plan.target, dotfiles)?.action != plan.action {
+                return Err(io::Error::other(format!(
+                    "directory state changed after the plan: {}",
+                    plan.source.display()
+                )));
+            }
+            apply_link(plan)
+        })();
+        if let Err(err) = result {
+            return rollback_after_error(err, &applied);
         }
-        apply_link(plan)?;
+        if plan.action != LinkAction::None {
+            applied.push(plan.clone());
+        }
+    }
+    Ok(applied)
+}
+
+fn rollback_after_error<T>(err: io::Error, applied: &[LinkPlan]) -> io::Result<T> {
+    match rollback_links(applied) {
+        Ok(()) => Err(err),
+        Err(rollback_err) => Err(io::Error::new(
+            err.kind(),
+            format!(
+                "migration failed ({err}) and failed to restore directory links ({rollback_err})"
+            ),
+        )),
+    }
+}
+
+fn rollback_links(plans: &[LinkPlan]) -> io::Result<()> {
+    let mut failures = Vec::new();
+    let mut failure_kind = None;
+    for plan in plans.iter().rev() {
+        if let Err(err) = rollback_link(plan) {
+            failure_kind.get_or_insert(err.kind());
+            failures.push(format!("{}: {err}", plan.source.display()));
+        }
+    }
+    if failures.is_empty() {
+        return Ok(());
+    }
+    Err(io::Error::new(
+        failure_kind.unwrap_or(io::ErrorKind::Other),
+        failures.join("; "),
+    ))
+}
+
+#[cfg(unix)]
+fn rollback_link(plan: &LinkPlan) -> io::Result<()> {
+    if plan.action == LinkAction::None {
+        return Ok(());
+    }
+    let dotfiles = plan.target.parent().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "dotfiles target has no parent")
+    })?;
+    if plan_link(&plan.source, &plan.target, dotfiles)?.action != LinkAction::None {
+        return Err(io::Error::other("directory state changed before rollback"));
+    }
+    if plan.action == LinkAction::Create
+        && fs::read_dir(&plan.target)?.next().transpose()?.is_some()
+    {
+        return Err(io::Error::other(format!(
+            "created directory is not empty: {}",
+            plan.target.display()
+        )));
+    }
+
+    fs::remove_file(&plan.source)?;
+    let result = match plan.action {
+        LinkAction::Move => fs::rename(&plan.target, &plan.source),
+        LinkAction::Create => fs::remove_dir(&plan.target),
+        LinkAction::Link | LinkAction::None => Ok(()),
+    };
+    if let Err(rollback_err) = result {
+        return match symlink(&plan.target, &plan.source) {
+            Ok(()) => Err(rollback_err),
+            Err(restore_err) => Err(io::Error::new(
+                rollback_err.kind(),
+                format!("rollback failed ({rollback_err}); link restore failed ({restore_err})"),
+            )),
+        };
     }
     Ok(())
+}
+
+#[cfg(not(unix))]
+fn rollback_link(_plan: &LinkPlan) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "directory symlinks require Unix",
+    ))
 }
 
 #[cfg(unix)]
@@ -311,4 +400,121 @@ fn apply_link(_plan: &LinkPlan) -> io::Result<()> {
         io::ErrorKind::Unsupported,
         "directory symlinks require Unix",
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{TOOL_CLAUDE, TOOL_CODEX};
+    use crate::sync::test_support::{doc, write_skill};
+    use tempfile::TempDir;
+
+    #[test]
+    #[cfg(unix)]
+    fn equivalent_symlink_target_is_already_linked() -> io::Result<()> {
+        let tmp = TempDir::new()?;
+        let home = tmp.path();
+        let dotfiles = home.join(".dotfiles");
+        let source = home.join(".agents");
+        let target = dotfiles.join("agents");
+        fs::create_dir_all(&target)?;
+        symlink(".dotfiles/../.dotfiles/agents", &source)?;
+
+        let plan = plan_link(&source, &target, &dotfiles)?;
+
+        assert_eq!(plan.action, LinkAction::None);
+        Ok(())
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn later_link_failure_restores_earlier_move() -> io::Result<()> {
+        let tmp = TempDir::new()?;
+        let home = tmp.path();
+        let dotfiles = home.join(".dotfiles");
+        fs::create_dir(&dotfiles)?;
+        let agents_source = home.join(".agents");
+        let agents_target = dotfiles.join("agents");
+        let claude_source = home.join(".claude");
+        let claude_target = dotfiles.join("claude");
+        fs::create_dir(&agents_source)?;
+        fs::write(agents_source.join("keep"), "agents")?;
+        fs::create_dir(&claude_source)?;
+        fs::write(claude_source.join("keep"), "claude")?;
+        let plans = vec![
+            plan_link(&agents_source, &agents_target, &dotfiles)?,
+            plan_link(&claude_source, &claude_target, &dotfiles)?,
+        ];
+        fs::create_dir(&claude_target)?;
+
+        let err = apply_links(&plans).unwrap_err();
+
+        assert!(err
+            .to_string()
+            .contains("refusing to merge existing directories"));
+        assert!(!fs::symlink_metadata(&agents_source)?
+            .file_type()
+            .is_symlink());
+        assert_eq!(fs::read_to_string(agents_source.join("keep"))?, "agents");
+        assert!(!agents_target.exists());
+        assert_eq!(fs::read_to_string(claude_source.join("keep"))?, "claude");
+        assert!(claude_target.is_dir());
+        Ok(())
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn skill_sync_failure_restores_relocated_roots() -> io::Result<()> {
+        let _env = crate::ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let tmp = TempDir::new()?;
+        let home = tmp.path().join("home");
+        fs::create_dir(&home)?;
+        std::env::set_var("RELAY_HOME", &home);
+        let result = (|| {
+            let mut cfg = Config::default_paths()?;
+            cfg.enabled_tools = vec![TOOL_CLAUDE.to_string(), TOOL_CODEX.to_string()];
+            cfg.central_skills_dir = home.join(".agents/skills");
+            cfg.claude_skills_dir = home.join(".claude/skills");
+            cfg.codex_skills_dir = home.join(".codex/relay-skills");
+            fs::create_dir(home.join(".dotfiles"))?;
+            fs::create_dir(home.join(".codex"))?;
+            write_skill(
+                &cfg.central_skills_dir,
+                "current",
+                &doc("current", "Current"),
+            )?;
+            fs::create_dir_all(home.join(".claude/commands"))?;
+            fs::write(home.join(".claude/settings.json"), "keep")?;
+            let plans = plan_dotfiles(&cfg)?;
+            let fault_target = cfg.codex_skills_dir.join("current");
+            std::env::set_var("RELAY_TEST_FAIL_SKILL_TARGET", &fault_target);
+
+            let migration = apply_migration(&cfg, Some(&plans));
+
+            std::env::remove_var("RELAY_TEST_FAIL_SKILL_TARGET");
+            let err = migration.unwrap_err();
+            assert!(err
+                .to_string()
+                .contains("injected late skill target failure"));
+            for source in [home.join(".agents"), home.join(".claude")] {
+                assert!(!fs::symlink_metadata(source)?.file_type().is_symlink());
+            }
+            assert!(!home.join(".dotfiles/agents").exists());
+            assert!(!home.join(".dotfiles/claude").exists());
+            assert!(cfg.central_skills_dir.join("current/SKILL.md").exists());
+            assert!(!cfg.claude_skills_dir.join("current").exists());
+            assert!(!cfg.codex_skills_dir.join("current").exists());
+            assert_eq!(
+                fs::read_to_string(home.join(".claude/settings.json"))?,
+                "keep"
+            );
+            assert!(!cfg.skill_state_path()?.exists());
+            Ok(())
+        })();
+        std::env::remove_var("RELAY_TEST_FAIL_SKILL_TARGET");
+        std::env::remove_var("RELAY_HOME");
+        result
+    }
 }
