@@ -6,6 +6,7 @@ mod history;
 mod init;
 mod logging;
 mod markers;
+mod migrate;
 mod path_cleanup;
 mod process_lock;
 mod report;
@@ -44,6 +45,18 @@ struct Cli {
 enum Commands {
     /// Set up config and folders interactively
     Init,
+    /// Move skills to the shared store and optionally link dotfiles
+    Migrate {
+        /// Preview migration without writing files (default behavior)
+        #[arg(short = 'p', long, conflicts_with = "apply")]
+        plan: bool,
+        /// Apply the migration
+        #[arg(short = 'a', long, conflicts_with = "plan")]
+        apply: bool,
+        /// Store ~/.agents and ~/.claude under ~/.dotfiles and link them
+        #[arg(long)]
+        dotfiles: bool,
+    },
     /// Sync command and skill files across tools
     Sync {
         /// Show per-action output
@@ -438,6 +451,18 @@ fn main() -> std::io::Result<()> {
             logging::debug("command=init");
             init::init()
         }
+        Commands::Migrate {
+            plan: _plan,
+            apply,
+            dotfiles,
+        } => {
+            logging::debug(&format!(
+                "command=migrate mode={} dotfiles={dotfiles}",
+                if apply { "apply" } else { "plan" }
+            ));
+            let cfg = load_cfg_with_hint(apply, true)?;
+            migrate::run(&cfg, apply, dotfiles)
+        }
         Commands::Sync {
             verbose,
             quiet,
@@ -527,7 +552,7 @@ fn main() -> std::io::Result<()> {
             Ok(())
         }
         Commands::Capabilities { json: _ } => {
-            const JSON: &str = r#"{"schema_version":1,"capabilities":{"skills.sync.scoped":1}}"#;
+            const JSON: &str = r#"{"schema_version":1,"capabilities":{"skills.migrate":1,"skills.sync.scoped":1}}"#;
             logging::debug("command=capabilities json=true");
             println!("{JSON}");
             Ok(())

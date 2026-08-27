@@ -38,6 +38,12 @@ pub(crate) fn print_scoped_conflict_summary(conflicts: &[SyncConflict]) {
     );
 }
 
+pub(crate) fn print_migration_conflict_summary(conflicts: &[SyncConflict]) {
+    println!("conflicts: {} detected", conflicts.len());
+    print_conflict_details(conflicts);
+    println!("migration aborted; resolve the differences and run the plan again");
+}
+
 fn print_conflict_details(conflicts: &[SyncConflict]) {
     for conflict in conflicts {
         let kind = match conflict.kind {
@@ -97,5 +103,6 @@ mod tests {
         ];
         print_conflict_summary(&conflicts);
         print_scoped_conflict_summary(&conflicts);
+        print_migration_conflict_summary(&conflicts);
     }
 }
