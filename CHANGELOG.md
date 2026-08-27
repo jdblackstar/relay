@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add skill migration command ([#25](https://github.com/jdblackstar/relay/pull/25))
 
 ## [0.2.6] - 2026-07-27
 
